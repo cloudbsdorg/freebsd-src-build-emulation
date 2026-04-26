@@ -1,1 +1,4 @@
+.if ${MK_EMULATION} != "no"
+SUBDIR+=	emu
+.endif
 SUBDIR+=	nvram
