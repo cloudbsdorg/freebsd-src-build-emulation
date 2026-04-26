@@ -215,17 +215,53 @@ emu_user_destroy_instance(uid_t uid, uint64_t memory)
 }
 
 /*
- * Find instance by ID
+ * Check if credential can see an instance
+ * This implements cr_cansee()-like filtering for emulation instances
+ *
+ * Returns 1 if visible, 0 if hidden
+ * Must be called with emu_instance_lock held
+ */
+static int
+emu_instance_cansee(struct ucred *cred, struct emu_instance *inst)
+{
+
+	/* Root can see all instances */
+	if (cred->cr_uid == 0)
+		return (1);
+
+	/* Users in GID_EMU group can see all instances */
+	if (groupmember(GID_EMU, cred))
+		return (1);
+
+	/* Owner can see their own instance */
+	if (cred->cr_uid == inst->inst_uid)
+		return (1);
+
+	/* Others cannot see this instance */
+	return (0);
+}
+
+/*
+ * Find instance by ID with visibility filtering
  * Must be called with emu_instance_lock held
  */
 static struct emu_instance *
 emu_find_instance(uint64_t inst_id)
 {
 	struct emu_instance *inst;
+	struct thread *td;
+	struct ucred *cred;
+
+	td = curthread;
+	cred = td->td_ucred;
 
 	TAILQ_FOREACH(inst, &emu_instances, inst_link) {
-		if (inst->inst_id == inst_id)
-			return (inst);
+		if (inst->inst_id == inst_id) {
+			/* Check if caller can see this instance */
+			if (emu_instance_cansee(cred, inst))
+				return (inst);
+			break;
+		}
 	}
 	return (NULL);
 }
@@ -540,7 +576,7 @@ emu_instance_get_info(uint64_t inst_id, struct sbuf *sb)
 }
 
 /*
- * Get total instance count
+ * Get total instance count (all instances, no filtering)
  */
 int
 emu_instance_total_count(void)
@@ -549,6 +585,65 @@ emu_instance_total_count(void)
 
 	mtx_lock(&emu_instance_lock);
 	count = TAILQ_COUNT(&emu_instances);
+	mtx_unlock(&emu_instance_lock);
+
+	return (count);
+}
+
+/*
+ * Get visible instance count for current thread
+ * This implements cr_cansee()-like filtering
+ */
+int
+emu_instance_visible_count(void)
+{
+	struct emu_instance *inst;
+	struct thread *td;
+	struct ucred *cred;
+	int count;
+
+	td = curthread;
+	cred = td->td_ucred;
+
+	mtx_lock(&emu_instance_lock);
+	count = 0;
+	TAILQ_FOREACH(inst, &emu_instances, inst_link) {
+		if (emu_instance_cansee(cred, inst))
+			count++;
+	}
+	mtx_unlock(&emu_instance_lock);
+
+	return (count);
+}
+
+/*
+ * Get list of visible instance IDs for current thread
+ * Returns number of instances filled in the array, or error code
+ */
+int
+emu_instance_list(uint64_t *inst_ids, int max_count)
+{
+	struct emu_instance *inst;
+	struct thread *td;
+	struct ucred *cred;
+	int count;
+
+	td = curthread;
+	cred = td->td_ucred;
+
+	if (inst_ids == NULL || max_count <= 0)
+		return (EINVAL);
+
+	mtx_lock(&emu_instance_lock);
+	count = 0;
+	TAILQ_FOREACH(inst, &emu_instances, inst_link) {
+		if (count >= max_count)
+			break;
+		if (emu_instance_cansee(cred, inst)) {
+			inst_ids[count] = inst->inst_id;
+			count++;
+		}
+	}
 	mtx_unlock(&emu_instance_lock);
 
 	return (count);
