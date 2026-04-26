@@ -70,7 +70,8 @@ All plan documents are in the `.plan/` directory, numbered using the `<Major>.<M
 3. Find a task with empty `Status`, `Assigned To`, and `Start`
 4. Check that all `Dependencies` are marked `✅ DONE`
 5. Claim it: set `Status` → `🔄 IN PROGRESS`, fill `Assigned To` and `Start`
-6. Commit: `git add .plan/<doc>.md && git commit -m "Claim task <ID>" && git push`
+6. Pull to check to see if your task was taken by another agent.
+7. Commit: `git add .plan/<doc>.md && git commit -m "Claim task <ID>" && git push`
 
 ### Completing a Task
 1. Implement the task following the plan document
