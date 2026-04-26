@@ -519,9 +519,12 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | `kern.emulation.instance.<name>.modules` | CTLTYPE_STRING | List loaded modules (read-only) |
 | `kern.emulation.memory_policy` | CTLTYPE_STRING | Memory allocation policy: "prealloc", "demand", "balloon" (default: "demand") |
 | `kern.emulation.memory_overcommit` | CTLTYPE_INT | Allow memory overcommit (0=off, 1=warn, 2=silent; default: 0) |
-| `kern.emulation.memory_warn_percent` | CTLTYPE_INT | Warn when configured memory exceeds this % of host RAM (default: 80) |
+| `kern.emulation.memory_warn_percent` | CTLTYPE_INT | Warn when configured memory exceeds this % of available host RAM (default: 80) |
 | `kern.emulation.memory_balloon_min_pct` | CTLTYPE_INT | Minimum balloon size as % of configured RAM (default: 10) |
 | `kern.emulation.memory_balloon_interval` | CTLTYPE_INT | Balloon adjustment interval in seconds (default: 5) |
+| `kern.emulation.memory_system_reserve_percent` | CTLTYPE_INT | Percentage of total physical memory reserved for OS and non-emulation processes (default: 20) |
+| `kern.emulation.sandbox_capsicum` | CTLTYPE_INT | Enable Capsicum sandboxing for emulator processes (default: 1) |
+| `kern.emulation.sandbox_strict` | CTLTYPE_INT | Strict mode: fail on Capsicum error (default: 0) |
 | `kern.emulation.instance.<name>.memory_used` | CTLTYPE_UINT64 | Current actual memory usage in bytes (read-only) |
 | `kern.emulation.instance.<name>.memory_policy` | CTLTYPE_STRING | Per-instance memory policy override (read-only) |
 | `kern.emulation.instance.<name>.balloon_target` | CTLTYPE_UINT64 | Balloon target size in bytes (writable) |
@@ -540,14 +543,14 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | Instruction decoder bugs causing incorrect emulation | High | Comprehensive test suite; compare against real hardware; fuzz testing |
 | Multiple instances competing for resources | Medium | Per-instance resource limits; max_instances sysctl; memory caps |
 | Race conditions in instance registry | Medium | Proper locking (`emu_instance_lock`); use `LIST` macros with mutex |
-| Emulator escape via instruction decoder exploit | Critical | Bounds checking, no JIT (no WX memory), Capsicum sandboxing — see `002-Emulation-Security-FS.md` |
+| Emulator escape via instruction decoder exploit | Critical | Bounds checking, no JIT (no WX memory), Capsicum sandboxing (see Section 6.5 of `002-Emulation-Security-FS.md` for full implementation) |
 | Filesystem escape via shared directory symlinks | High | `realpath()` resolution, blocked path prefixes, read-only by default — see `002-Emulation-Security-FS.md` |
 | Guest resource exhaustion (CPU/memory) | High | Per-instance memory limits, instruction count limits, watchdog timers — see `002-Emulation-Security-FS.md` |
 | Network-based lateral movement from emulated instance | Medium | Host-only mode by default, MAC filtering, rate limiting — see `002-Emulation-Security-FS.md` |
 | Unauthorized non-root access to emulation framework | High | Root-only default, `kern.emulation.allow_nonroot` sysctl, `emu` group membership — see `002-Emulation-Security-FS.md` |
 | User destroys another user's instance | High | Ownership model, granular permissions, `PRIV_EMU_DESTROY` privilege — see `002-Emulation-Security-FS.md` |
 | User exhausts system resources via excessive instances | Medium | Per-user instance/memory limits, `max_instances_per_user` sysctl — see `002-Emulation-Security-FS.md` |
-| Memory overcommit causes host OOM or swap thrashing | High | Demand paging with `MAP_NORESERVE`, `memory_overcommit` sysctl (default off), `memory_warn_percent` threshold (based on total host physical minus already-consumed by other instances minus safety margin), balloon driver to reclaim memory under pressure — see `002-Emulation-Security-FS.md` |
+| Memory overcommit causes host OOM or swap thrashing | High | Demand paging with `MAP_NORESERVE`, `memory_overcommit` sysctl (default off), `memory_warn_percent` threshold (based on total host physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin), balloon driver to reclaim memory under pressure — see `002-Emulation-Security-FS.md` |
 | Balloon driver bug causes guest instability or memory corruption | High | Balloon operates within guest-allocated pages only, min balloon floor via `memory_balloon_min_pct`, validation of balloon target values |
 
 ---
@@ -609,7 +612,7 @@ This section is the master checklist for implementing the kernel emulation frame
 | 2.13 | Implement `emu_console.c` — console capture | NOT STARTED | | | | 2.2 | `sys/emulation/emu_console.c` | Capture guest console output |
 | 2.14 | Implement `emu_crash.c` — crash detection | NOT STARTED | | | | 2.2 | `sys/emulation/emu_crash.c` | Detect panics, capture crash dumps |
 | 2.15 | Implement `emu_module.c` — module state tracking | NOT STARTED | | | | 2.2 | `sys/emulation/emu_module.c` | Track loaded modules in emulated environment |
-| 2.16 | Implement `emu_memmgmt.c` — memory management & tracking | NOT STARTED | | | | 2.3 | `sys/emulation/emu_memmgmt.c` | Memory policy sysctls (`memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`), per-instance `memory_used` tracking, host memory capacity detection (total physical minus already-consumed by other instances minus safety margin), overcommit warning logic, per-instance balloon target interface |
+| 2.16 | Implement `emu_memmgmt.c` — memory management & tracking | NOT STARTED | | | | 2.3 | `sys/emulation/emu_memmgmt.c` | Memory policy sysctls (`memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent`), per-instance `memory_used` tracking, host memory capacity detection (total physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin), overcommit warning logic, per-instance balloon target interface |
 
 ### Phase 3: Architecture-Specific CPU Emulation
 
@@ -769,12 +772,12 @@ This section is the master checklist for implementing the kernel emulation frame
 | C.10 | `usr.sbin/emu/` directory created with CLI tool | Userland | NOT STARTED | | C.8, C.9 | Phase 6 files | `emu` command-line interface |
 | C.11 | Multi-instance management implemented | Userland | NOT STARTED | | C.10 | `usr.sbin/emu/emu_list.c`, `emu_status.c` | Different archs simultaneously |
 | C.12 | Stack examination and debugging implemented | Debugging | NOT STARTED | | C.10 | Phase 7 files | Stack capture, symbol resolution, GDB stub |
-| C.13 | Memory management sysctls implemented | Memory | NOT STARTED | | C.4 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval` |
+| C.13 | Memory management sysctls implemented | Memory | NOT STARTED | | C.4 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent` |
 | C.14 | Demand-paged guest memory (`mmap MAP_NORESERVE`) implemented | Memory | NOT STARTED | | C.9 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
 | C.15 | virtio-balloon device implemented for bhyve path | Memory | NOT STARTED | | C.8 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
 | C.16 | Per-instance `memory_used` tracking implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring |
-| C.17 | Memory overcommit safeguards and warnings implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Host capacity check, threshold warning |
-| C.18 | Memory management tests written and passing | Testing | NOT STARTED | | C.13–C.17 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit |
+| C.17 | Memory overcommit safeguards and warnings implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Host capacity check (total physical minus system-wide used (OS + other processes) minus already-consumed by other instances minus safety margin), threshold warning |
+| C.18 | Memory management tests written and passing | Testing | NOT STARTED | | C.13–C.17 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, system-wide memory awareness |
 | C.19 | Test suite written and passing | Testing | NOT STARTED | | C.18 | Phase 8 files | Unit, integration, and performance tests |
 | C.20 | Documentation and man pages written | Documentation | NOT STARTED | | C.19 | Phase 9 files | Man pages, developer docs, RELNOTES |
 | C.21 | Committed to GitHub | Release | NOT STARTED | | C.20 | | Push to repository |
@@ -791,7 +794,8 @@ The recommended approach provides:
 - **Off by default**: Safe for production systems
 - **Multi-instance support**: Run emulated environments of different architectures simultaneously
 - **Stack examination**: First-class support for debugging and AI-agent consumption
-- **Dynamic memory management**: Demand-paged memory allocation reduces host memory consumption to only actively used pages; balloon driver for bhyve path; configurable memory policy (prealloc/demand/balloon) with overcommit safeguards and warnings
+- **Dynamic memory management**: Demand-paged memory allocation reduces host memory consumption to only actively used pages; balloon driver for bhyve path; configurable memory policy (prealloc/demand/balloon) with overcommit safeguards and warnings; system-wide memory awareness (OS + other processes) for host capacity detection
+- **Capsicum sandboxing**: Both custom emulator and bhyve paths enter capability mode after initialization, restricting file descriptor rights and preventing filesystem escape, process injection, and lateral movement
 - **Incremental deployment**: Start with amd64 (bhyve), add architectures over time
 
 This approach aligns with FreeBSD's design philosophy, reuses existing VMM/bhyve infrastructure where appropriate, and builds a lightweight custom emulator for cross-architecture testing — all without external dependencies.

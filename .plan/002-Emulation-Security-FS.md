@@ -105,7 +105,7 @@ The custom emulator runs as a **regular userland process** with no special privi
 - **No kernel component needed**: Pure emulation requires no kernel module
 - **Standard process isolation**: The OS enforces process boundaries via virtual memory, file descriptors, and process credentials
 - **No /dev/vmm access**: The custom emulator does not use the VMM interface
-- **Capsicum sandboxing** (future): The emulator process can be further restricted using FreeBSD's Capsicum capability mode (`cap_enter()`) to drop privileges after initialization
+- **Capsicum sandboxing**: The emulator process is further restricted using FreeBSD's Capsicum capability mode (`cap_enter()`) to drop privileges after initialization. See Section 6.5 for full implementation details.
 
 **Memory isolation:**
 - Guest memory is allocated via `malloc()` or `mmap()` in the emulator's heap
@@ -217,15 +217,8 @@ for (int fd = 3; fd < getdtablesize(); fd++) {
         close(fd);
 }
 
-/* Future: Capsicum sandboxing */
-#ifdef CAPABILITIES
-    cap_rights_t rights;
-    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_MMAP);
-    if (cap_rights_limit(vm_fd, &rights) < 0)
-        err(1, "cap_rights_limit");
-    if (cap_enter() < 0)
-        err(1, "cap_enter");
-#endif
+/* Capsicum sandboxing — see Section 6.5 for full implementation */
+    emu_bhyve_enter_sandbox(inst);
 ```
 
 ---
@@ -651,26 +644,344 @@ emu_elf_load(struct emu_instance *inst, const char *path)
 }
 ```
 
-### 6.5 Capsicum Sandboxing (Future Enhancement)
+### 6.5 Capsicum Sandboxing
 
-FreeBSD's Capsicum framework can further restrict the emulator process:
+FreeBSD's Capsicum capability framework provides fine-grained rights restriction on file descriptors and process capabilities. The emulation framework implements Capsicum sandboxing as a **first-class security feature**, not a future enhancement. Both the custom emulator and bhyve paths enter capability mode after initialization is complete.
+
+#### 6.5.1 Architecture Overview
+
+```
+Process Startup
+      │
+      ├── Parse config, open files, allocate memory
+      ├── Load kernel/module into guest memory
+      ├── Set up devices, console, network
+      ├── Open disk image, snapshot, log files
+      ├── Bind GDB socket (if enabled)
+      │
+      ▼
+  ┌─────────────────────────────────────────────┐
+  │         CAPSICUM ENTER POINT                 │
+  │                                              │
+  │  1. Limit rights on all open file descriptors│
+  │  2. Call cap_enter() to enter capability mode│
+  │  3. After cap_enter(): no new capabilities,  │
+  │     no new FDs, no /proc, no sysctl, no fork │
+  └─────────────────────────────────────────────┘
+      │
+      ▼
+  ┌─────────────────────────────────────────────┐
+  │         EMULATION RUN LOOP                   │
+  │  (fetch-decode-execute under Capsicum)       │
+  │                                              │
+  │  Allowed operations only:                    │
+  │  - Read/write/seek on disk image FD          │
+  │  - Read/write on console pipe FD             │
+  │  - Read/write/accept on GDB socket FD        │
+  │  - mmap/mprotect/munmap on existing mappings │
+  │  - clock_gettime (for timers)                │
+  └─────────────────────────────────────────────┘
+```
+
+#### 6.5.2 Custom Emulator Capsicum Implementation
+
+The custom emulator (`usr.sbin/emu/emu_engine.c`) enters capability mode after all initialization is complete:
 
 ```c
-/* After initialization, enter capability mode */
-if (cap_enter() < 0) {
-    warn("cap_enter failed — continuing without sandbox");
-} else {
-    /* In capability mode: no new rights, no /proc, no sysctl, etc. */
-    /* Only previously acquired capabilities are available */
+#include <sys/capsicum.h>
+
+/*
+ * Enter Capsicum capability mode for the custom emulator process.
+ * Called after all initialization is complete (config parsed,
+ * kernel loaded, devices set up, files opened).
+ *
+ * Returns 0 on success, -1 on failure (process continues without
+ * sandbox in degraded mode).
+ */
+int
+emu_enter_sandbox(struct emu_instance *inst)
+{
+    cap_rights_t rights;
+
+    /* ── Step 1: Limit rights on disk image FD ── */
+    /* Allow: read, write, seek. Deny: exec, ioctl, fcntl, etc. */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_SEEK);
+    if (cap_rights_limit(inst->disk_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(disk_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 2: Limit rights on console pipe FD ── */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE);
+    if (cap_rights_limit(inst->console_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(console_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 3: Limit rights on GDB socket FD (if enabled) ── */
+    if (inst->gdb_fd >= 0) {
+        cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_ACCEPT);
+        if (cap_rights_limit(inst->gdb_fd, &rights) < 0 && errno != ENOSYS) {
+            warn("cap_rights_limit(gdb_fd) failed");
+            return (-1);
+        }
+    }
+
+    /* ── Step 4: Limit rights on snapshot/log FDs (if open) ── */
+    if (inst->snapshot_fd >= 0) {
+        cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_SEEK);
+        if (cap_rights_limit(inst->snapshot_fd, &rights) < 0 && errno != ENOSYS) {
+            warn("cap_rights_limit(snapshot_fd) failed");
+            return (-1);
+        }
+    }
+
+    /* ── Step 5: Limit ioctls on any control FDs ── */
+    /* No ioctls should be needed after initialization */
+
+    /* ── Step 6: Close all non-essential FDs ── */
+    for (int fd = 3; fd < getdtablesize(); fd++) {
+        if (!emu_is_essential_fd(inst, fd))
+            close(fd);
+    }
+
+    /* ── Step 7: Enter capability mode ── */
+    if (cap_enter() < 0) {
+        /* ENOSYS means Capsicum not available in this kernel */
+        if (errno != ENOSYS) {
+            warn("cap_enter() failed");
+            return (-1);
+        }
+        /* Capsicum not available — continue without sandbox */
+        warnx("Capsicum not available — running without sandbox");
+        return (0);
+    }
+
+    /*
+     * After cap_enter():
+     * - No new capabilities can be acquired
+     * - No new file descriptors can be opened
+     * - No access to /proc, /dev, or global namespaces
+     * - No fork(), no sysctl()
+     * - Only operations on already-open FDs with limited rights
+     */
+
+    inst->sandboxed = true;
+    return (0);
+}
+
+/* Helper: determine if a file descriptor is essential for emulation */
+static bool
+emu_is_essential_fd(struct emu_instance *inst, int fd)
+{
+    return (fd == inst->disk_fd ||
+            fd == inst->console_fd ||
+            fd == inst->gdb_fd ||
+            fd == inst->snapshot_fd ||
+            fd == STDIN_FILENO ||
+            fd == STDOUT_FILENO ||
+            fd == STDERR_FILENO);
 }
 ```
 
-Capsicum would prevent the emulator from:
-- Opening new files (after initialization)
-- Accessing `/proc` or `/dev`
-- Making arbitrary sysctl calls
-- Creating new network sockets (if not needed)
-- Forking new processes
+#### 6.5.3 bhyve Path Capsicum Implementation
+
+The bhyve path (`usr.sbin/emu/emu_bhyve.c`) enters capability mode after VM creation, device setup, and privilege drop:
+
+```c
+int
+emu_bhyve_enter_sandbox(struct emu_instance *inst)
+{
+    cap_rights_t rights;
+
+    /* ── Step 1: Limit rights on /dev/vmm/<name> FD ── */
+    /* Allow: read, write, ioctl (for VMM operations), mmap (for guest memory) */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_IOCTL, CAP_MMAP);
+    if (cap_rights_limit(inst->vmm_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(vmm_fd) failed");
+        return (-1);
+    }
+
+    /* Restrict ioctls to only VMM-related ones */
+    unsigned long vmm_ioctls[] = {
+        VM_RUN, VM_SUSPEND, VM_REINIT, VM_STATS,
+        VM_SET_CAPABILITY, VM_GET_CAPABILITY,
+        VM_SET_REGISTER_SET, VM_GET_REGISTER_SET,
+        VM_SET_MEMSEG, VM_GET_MEMSEG,
+        VM_IOMMU_MAP, VM_IOMMU_UNMAP,
+        VM_PPTDEV_MSI, VM_PPTDEV_MSIX,
+        VM_GET_VCPU_COUNT, VM_GET_DEVICE_COUNT,
+        VM_GET_DEVICE_INFO, VM_GET_MEMORY_SIZE,
+        VM_GET_TOPOLOGY, VM_SET_TOPOLOGY,
+    };
+    if (cap_ioctls_limit(inst->vmm_fd, vmm_ioctls,
+                         nitems(vmm_ioctls)) < 0 && errno != ENOSYS) {
+        warn("cap_ioctls_limit(vmm_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 2: Limit rights on disk image FD ── */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_SEEK);
+    if (cap_rights_limit(inst->disk_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(disk_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 3: Limit rights on console pipe FD ── */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE);
+    if (cap_rights_limit(inst->console_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(console_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 4: Close all non-essential FDs ── */
+    for (int fd = 3; fd < getdtablesize(); fd++) {
+        if (!emu_bhyve_is_essential_fd(inst, fd))
+            close(fd);
+    }
+
+    /* ── Step 5: Enter capability mode ── */
+    if (cap_enter() < 0) {
+        if (errno != ENOSYS) {
+            warn("cap_enter() failed");
+            return (-1);
+        }
+        warnx("Capsicum not available — running without sandbox");
+        return (0);
+    }
+
+    inst->sandboxed = true;
+    return (0);
+}
+```
+
+#### 6.5.4 Rights Inventory
+
+Each file descriptor type has a specific set of allowed capabilities:
+
+| FD Type | Allowed Rights | Rationale |
+|---------|---------------|-----------|
+| Disk image | `CAP_READ`, `CAP_WRITE`, `CAP_SEEK` | Block-level I/O for guest storage |
+| Console pipe | `CAP_READ`, `CAP_WRITE` | Serial console I/O |
+| GDB socket | `CAP_READ`, `CAP_WRITE`, `CAP_ACCEPT` | Remote debugging connections |
+| Snapshot file | `CAP_READ`, `CAP_WRITE`, `CAP_SEEK` | Save/restore emulator state |
+| `/dev/vmm/<name>` | `CAP_READ`, `CAP_WRITE`, `CAP_IOCTL`, `CAP_MMAP` | VMM control (bhyve path only) |
+| stdin/stdout/stderr | `CAP_READ`, `CAP_WRITE` | Process I/O |
+| Log file | `CAP_READ`, `CAP_WRITE`, `CAP_SEEK` | Audit logging |
+
+#### 6.5.5 Error Handling & Degraded Mode
+
+Capsicum availability varies across FreeBSD versions and kernel configurations:
+
+| Scenario | Behavior | Log Level |
+|----------|----------|-----------|
+| `cap_enter()` succeeds | Full sandbox active | INFO |
+| `cap_enter()` returns ENOSYS | Capsicum not compiled into kernel — continue without sandbox | WARNING |
+| `cap_rights_limit()` returns ENOSYS | Old kernel without Capsicum support — continue without sandbox | WARNING |
+| `cap_rights_limit()` returns EINVAL | Invalid rights combination — log error, continue without sandbox for that FD | ERROR |
+| `cap_enter()` returns EPERM | Already in capability mode or other restriction — log error, continue without sandbox | ERROR |
+
+The emulator **always continues running** even if Capsicum setup fails, operating in degraded mode. This ensures the emulation framework works on all FreeBSD systems regardless of Capsicum support.
+
+#### 6.5.6 Sysctl Controls
+
+| Sysctl | Type | Default | Description |
+|--------|------|---------|-------------|
+| `kern.emulation.sandbox_capsicum` | CTLTYPE_INT | 1 | Enable Capsicum sandboxing (0=disable, 1=enable). When disabled, the emulator skips `cap_enter()` and `cap_rights_limit()` calls entirely. |
+| `kern.emulation.sandbox_strict` | CTLTYPE_INT | 0 | Strict mode: if Capsicum setup fails, refuse to start the instance (0=degraded mode, 1=strict). In strict mode, any Capsicum failure prevents instance startup. |
+
+#### 6.5.7 Testing Capsicum Sandboxing
+
+```c
+/* Test: Verify cap_enter() succeeds */
+static int
+test_capsicum_enter(void)
+{
+    /* Fork a child process to test Capsicum */
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: attempt to enter capability mode */
+        if (cap_enter() < 0)
+            _exit(1);
+
+        /* After cap_enter(), opening a new file should fail */
+        int fd = open("/etc/passwd", O_RDONLY);
+        if (fd >= 0)
+            _exit(2);  /* Should have failed! */
+
+        _exit(0);  /* Success */
+    }
+
+    int status;
+    waitpid(pid, &status, 0);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* Test: Verify rights limitation works */
+static int
+test_capsicum_rights_limit(void)
+{
+    int pipefd[2];
+    pipe(pipefd);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: limit rights on pipe write end to CAP_WRITE only */
+        cap_rights_t rights;
+        cap_rights_init(&rights, CAP_WRITE);
+        cap_rights_limit(pipefd[1], &rights);
+
+        /* Reading from the write-only FD should fail */
+        char buf[16];
+        ssize_t n = read(pipefd[1], buf, sizeof(buf));
+        if (n >= 0)
+            _exit(1);  /* Should have failed! */
+
+        /* Writing should succeed */
+        n = write(pipefd[1], "test", 4);
+        if (n < 0)
+            _exit(2);  /* Should have succeeded! */
+
+        _exit(0);
+    }
+
+    int status;
+    waitpid(pid, &status, 0);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* Test: Verify emulator runs correctly under Capsicum */
+static int
+test_emulator_runs_under_capsicum(void)
+{
+    /* Start an emulator instance with sandboxing enabled */
+    /* Verify it enters capability mode and runs normally */
+    /* Verify it can still read/write disk, console, etc. */
+    /* Verify it cannot open new files */
+    return (0);  /* Placeholder — full test in integration suite */
+}
+```
+
+#### 6.5.8 What Capsicum Prevents
+
+After entering capability mode, the emulator process is restricted from:
+
+| Operation | Before Capsicum | After Capsicum | Impact |
+|-----------|----------------|----------------|--------|
+| Open new files | ✅ Allowed | ❌ Denied | Prevents filesystem escape via guest-triggered file open |
+| Access `/proc` | ✅ Allowed | ❌ Denied | Prevents process information leakage |
+| Access `/dev` | ✅ Allowed | ❌ Denied | Prevents device node access |
+| `sysctl()` calls | ✅ Allowed | ❌ Denied | Prevents kernel parameter modification |
+| `fork()` / `exec()` | ✅ Allowed | ❌ Denied | Prevents process injection |
+| Network sockets (new) | ✅ Allowed | ❌ Denied | Prevents lateral movement (existing socket OK) |
+| `mmap()` with new rights | ✅ Allowed | ❌ Denied | Prevents memory manipulation |
+| `ioctl()` on restricted FD | ✅ Allowed | ❌ Denied | Only allowed ioctls pass through |
+| Read/write disk image | ✅ Allowed | ✅ Allowed | Essential for emulation |
+| Read/write console | ✅ Allowed | ✅ Allowed | Essential for console I/O |
+| `clock_gettime()` | ✅ Allowed | ✅ Allowed | Essential for timer emulation |
+| Signal handling | ✅ Allowed | ✅ Allowed | Essential for crash detection |
 
 ---
 
@@ -1033,8 +1344,10 @@ The host must never be affected by a guest crash:
 | Memory mgmt | Per-instance `memory_used` tracking | P0 |
 | Memory mgmt | virtio-balloon device for bhyve path | P1 |
 | Memory mgmt | `memory_balloon_min_pct` floor protection | P1 |
-| Memory mgmt | Host memory capacity check on instance start (total minus already-consumed minus safety margin) | P0 |
+| Memory mgmt | Host memory capacity check on instance start (total minus system-wide used (OS + other processes) minus already-consumed by other instances minus safety margin) | P0 |
 | Memory mgmt | Already-consumed memory tracking across all instances | P0 |
+| Memory mgmt | System-wide memory consumption tracking via `vm.stats.vm.*` sysctls | P0 |
+| Memory mgmt | `memory_system_reserve_percent` sysctl for OS/process reserve | P0 |
 
 ### 10.2 Security Checklist
 
@@ -1073,6 +1386,13 @@ The host must never be affected by a guest crash:
 | SC.29 | Multi-instance isolation enforced by process boundaries | Instance Mgmt | NOT STARTED | | S1.5 | `sys/emulation/emu_instance.c` | Separate process per instance |
 | SC.30 | Access control unit tests written and passing | Testing | NOT STARTED | | SC.1–SC.9 | `tests/sys/emulation/acl_test.c` | Permission checks, ownership, limits |
 | SC.31 | Access control integration tests written and passing | Testing | NOT STARTED | | SC.30 | `tests/usr.sbin/emu/acl_integration_test.sh` | End-to-end access control scenarios |
+| SC.32 | Custom emulator Capsicum sandboxing implemented | Hardening | NOT STARTED | | S5.1 | `usr.sbin/emu/emu_engine.c` | `emu_enter_sandbox()`: `cap_rights_limit()` on all FDs, `cap_enter()`. See Section 6.5. |
+| SC.33 | bhyve path Capsicum sandboxing implemented | Hardening | NOT STARTED | | S5.2 | `usr.sbin/emu/emu_bhyve.c` | `emu_bhyve_enter_sandbox()`: `cap_rights_limit()` + `cap_ioctls_limit()` on VMM FD, `cap_enter()`. See Section 6.5. |
+| SC.34 | Essential FD helpers and FD cleanup implemented | Hardening | NOT STARTED | | S5.3 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `emu_is_essential_fd()` / `emu_bhyve_is_essential_fd()` |
+| SC.35 | `kern.emulation.sandbox_capsicum` sysctl implemented | Hardening | NOT STARTED | | SC.32, SC.33 | `sys/emulation/emu_sysctl.c` | Enable/disable Capsicum sandboxing (default 1) |
+| SC.36 | `kern.emulation.sandbox_strict` sysctl implemented | Hardening | NOT STARTED | | SC.35 | `sys/emulation/emu_sysctl.c` | Strict mode: fail on Capsicum error (default 0) |
+| SC.37 | Capsicum sandboxing unit tests written and passing | Testing | NOT STARTED | | SC.32–SC.36 | `tests/sys/emulation/capsicum_test.c` | `test_capsicum_enter()`, `test_capsicum_rights_limit()`, `test_emulator_runs_under_capsicum()` |
+| SC.38 | Capsicum sandboxing integration tests written and passing | Testing | NOT STARTED | | SC.37 | `tests/usr.sbin/emu/capsicum_integration_test.sh` | End-to-end Capsicum sandboxing scenarios |
 
 ---
 
@@ -1143,14 +1463,16 @@ The host must never be affected by a guest crash:
 
 | # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
-| S5.1 | Implement Capsicum sandboxing for custom emulator | NOT STARTED | | | | | S1.1 | `usr.sbin/emu/emu_engine.c` | `cap_enter()` after initialization |
-| S5.2 | Implement Capsicum sandboxing for bhyve process | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_bhyve.c` | `cap_enter()` after privilege drop |
-| S5.3 | Close unnecessary file descriptors in both paths | NOT STARTED | | | | | S5.1, S5.2 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | Keep only essential FDs open |
+| S5.1 | Implement Capsicum sandboxing for custom emulator | NOT STARTED | | | | | S1.1 | `usr.sbin/emu/emu_engine.c` | `emu_enter_sandbox()`: limit rights on disk/console/GDB/snapshot FDs via `cap_rights_limit()`, close non-essential FDs, call `cap_enter()`. See Section 6.5 for full implementation specification. |
+| S5.2 | Implement Capsicum sandboxing for bhyve process | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_bhyve.c` | `emu_bhyve_enter_sandbox()`: limit rights on `/dev/vmm/<name>` FD (CAP_READ, CAP_WRITE, CAP_IOCTL, CAP_MMAP), restrict ioctls via `cap_ioctls_limit()`, limit disk/console FDs, close non-essential FDs, call `cap_enter()`. See Section 6.5 for full implementation specification. |
+| S5.3 | Close unnecessary file descriptors in both paths | NOT STARTED | | | | | S5.1, S5.2 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `emu_is_essential_fd()` / `emu_bhyve_is_essential_fd()` helpers. Close all FDs except disk, console, GDB, snapshot, VMM, and stdio. |
 | S5.4 | Add instruction count limits per execution slice | NOT STARTED | | | | | S1.3 | `usr.sbin/emu/emu_engine.c` | Prevent infinite loops in guest code |
 | S5.5 | Add watchdog timer for crash detection | NOT STARTED | | | | | S1.6 | `usr.sbin/emu/emu_engine.c` | Configurable timeout, trigger crash capture |
 | S5.6 | Security audit of all MMIO handlers | NOT STARTED | | | | | S4.1 | All device files | Verify bounds checking, input validation |
 | S5.7 | Fuzz testing of instruction decoder | NOT STARTED | | | | | S1.3 | `tests/sys/emulation/fuzz_test.c` | Random instruction sequences, edge cases |
-| S5.8 | Write security documentation | NOT STARTED | | | | | S5.1–S5.7 | `share/doc/emulation/security.md` | Threat model, security guidelines, incident response |
+| S5.8 | Write Capsicum sandboxing unit tests | NOT STARTED | | | | | S5.1, S5.2 | `tests/sys/emulation/capsicum_test.c` | `test_capsicum_enter()`, `test_capsicum_rights_limit()`, `test_emulator_runs_under_capsicum()`. See Section 6.5.7 for test specifications. |
+| S5.9 | Write Capsicum sandboxing integration tests | NOT STARTED | | | | | S5.8 | `tests/usr.sbin/emu/capsicum_integration_test.sh` | Start instance with sandboxing enabled, verify it runs correctly, verify it cannot open new files or access /proc. |
+| S5.10 | Write security documentation | NOT STARTED | | | | | S5.1–S5.9 | `share/doc/emulation/security.md` | Threat model, security guidelines, incident response |
 
 ### Phase S6: Memory Management & Overcommit Safety
 
@@ -1159,15 +1481,15 @@ The host must never be affected by a guest crash:
 | # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
 | S6.1 | Implement `emu_memmgmt.c` — memory policy sysctls | NOT STARTED | | | | | 2.3 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval` |
-| S6.2 | Implement host memory capacity detection | NOT STARTED | | | | | S6.1 | `sys/emulation/emu_memmgmt.c` | Read `hw.physmem` or `vm.page_count`. Subtract already-consumed memory from other emulation instances (sum of `memory_used` or configured memory, whichever is tracked). Subtract configurable safety margin. Result is available capacity for new instances. |
-| S6.3 | Implement overcommit warning logic | NOT STARTED | | | | | S6.2 | `sys/emulation/emu_memmgmt.c` | Compare total configured memory across all instances against available host capacity (total physical minus already-consumed by other instances minus safety margin). Log warning when threshold (`memory_warn_percent`) is exceeded. Include breakdown: total configured, already consumed, available, new instance request. |
+| S6.2 | Implement host memory capacity detection | NOT STARTED | | | | | S6.1 | `sys/emulation/emu_memmgmt.c` | Read `hw.physmem` or `vm.page_count` for total physical. Read `vm.stats.vm.v_active_count`, `vm.stats.vm.v_wire_count`, `vm.stats.vm.v_cache_count`, `vm.stats.vm.v_inactive_count` to calculate system-wide used memory (OS + all non-emulation processes). Subtract already-consumed memory from other emulation instances. Subtract configurable safety margin (`memory_system_reserve_percent`). Result is available capacity for new instances. |
+| S6.3 | Implement overcommit warning logic | NOT STARTED | | | | | S6.2 | `sys/emulation/emu_memmgmt.c` | Compare total configured memory across all instances against available host capacity (total physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin). Log warning when threshold (`memory_warn_percent`) is exceeded. Include breakdown: total physical, system-wide used, already consumed by instances, safety reserve, available, new instance request. |
 | S6.4 | Implement per-instance `memory_used` tracking | NOT STARTED | | | | | S6.1 | `sys/emulation/emu_memmgmt.c` | Periodic RSS sampling via `procstat` or kernel `vmspace` |
 | S6.5 | Implement demand-paged guest memory in custom emulator | NOT STARTED | | | | | 5.2 | `usr.sbin/emu/emu_engine.c` | `mmap(MAP_ANON | MAP_NORESERVE)` instead of `malloc()` |
 | S6.6 | Implement prealloc memory mode | NOT STARTED | | | | | S6.5 | `usr.sbin/emu/emu_engine.c` | Traditional `malloc()` for full allocation |
 | S6.7 | Implement virtio-balloon device for bhyve path | NOT STARTED | | | | | 4.2 | `usr.sbin/bhyve/pci_virtio_balloon.c` | PCI balloon device, inflate/deflate via guest |
 | S6.8 | Implement balloon target sysctl interface | NOT STARTED | | | | | S6.7 | `sys/emulation/emu_memmgmt.c` | `kern.emulation.instance.<name>.balloon_target` |
 | S6.9 | Implement balloon periodic adjustment timer | NOT STARTED | | | | | S6.8 | `usr.sbin/bhyve/pci_virtio_balloon.c` | `memory_balloon_interval` timer, min floor via `memory_balloon_min_pct` |
-| S6.10 | Write memory management tests | NOT STARTED | | | | | S6.1–S6.9 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, tracking |
+| S6.10 | Write memory management tests | NOT STARTED | | | | | S6.1–S6.9 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, tracking, system-wide memory awareness |
 
 ---
 
@@ -1295,9 +1617,10 @@ struct emu_crash_dump {
 | `kern.emulation.blocked_share_paths` | CTLTYPE_STRING | "/dev,/proc,/sys,/etc" | Comma-separated blocked share prefixes |
 | `kern.emulation.memory_policy` | CTLTYPE_STRING | "demand" | Memory allocation policy: "prealloc", "demand", "balloon" |
 | `kern.emulation.memory_overcommit` | CTLTYPE_INT | 0 | Allow memory overcommit (0=off, 1=warn, 2=silent) |
-| `kern.emulation.memory_warn_percent` | CTLTYPE_INT | 80 | Warn when configured memory exceeds this % of host RAM |
+| `kern.emulation.memory_warn_percent` | CTLTYPE_INT | 80 | Warn when configured memory exceeds this % of available host RAM |
 | `kern.emulation.memory_balloon_min_pct` | CTLTYPE_INT | 10 | Minimum balloon size as % of configured RAM |
 | `kern.emulation.memory_balloon_interval` | CTLTYPE_INT | 5 | Balloon adjustment interval in seconds |
+| `kern.emulation.memory_system_reserve_percent` | CTLTYPE_INT | 20 | Percentage of total physical memory reserved for OS and non-emulation processes |
 
 ---
 
@@ -1318,7 +1641,7 @@ struct emu_crash_dump {
 | GDB stub allows arbitrary memory access | High | Localhost-only binding, authentication (future) |
 | Crash dump contains host memory data | Low | Crash dumps only contain guest state, not emulator state |
 | User creates excessive instances to exhaust resources | Medium | Per-user instance limits, per-group limits, `max_instances_per_user` sysctl |
-| Memory overcommit causes host OOM kill | Critical | `memory_overcommit` sysctl (default 0), `memory_warn_percent` threshold, demand paging with `MAP_NORESERVE`, host memory capacity check on instance start (total physical minus already-consumed by other instances minus safety margin) |
+| Memory overcommit causes host OOM kill | Critical | `memory_overcommit` sysctl (default 0), `memory_warn_percent` threshold, demand paging with `MAP_NORESERVE`, host memory capacity check on instance start (total physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin) |
 | Balloon driver failure causes guest memory pressure or crash | High | Minimum balloon floor via `memory_balloon_min_pct`, balloon target validation, guest cooperation required for inflation |
 | Demand paging exposes host memory pressure to guest | Medium | Guest may experience unexpected latency when host is under memory pressure; mitigated by balloon driver that proactively releases memory |
 | Memory tracking overhead impacts emulator performance | Low | `memory_used` sampled periodically (not on every access), configurable sampling interval |
@@ -1327,18 +1650,17 @@ struct emu_crash_dump {
 
 ## 15. Future Security Enhancements
 
-1. **Capsicum sandboxing**: Full capability mode for both emulator and bhyve processes
-2. **Seccomp-like syscall filtering**: Restrict syscalls available to the emulator process
-3. **Address space layout randomization (ASLR)**: Randomize emulator memory layout
-4. **Instruction decoder fuzzing**: Automated fuzz testing of all instruction decoders
-5. **Kernel module signing**: Require signed modules before loading into emulated environment
-6. **Audit logging**: Log all security-relevant events (instance create/destroy, share mounts, crashes, permission denials)
-7. **Network traffic inspection**: Inspect guest network traffic for malicious patterns
-8. **Resource accounting**: Track CPU time, memory, disk I/O per instance
-9. **Secure snapshot encryption**: Encrypt snapshot files at rest
-10. **Multi-tenant isolation**: Stronger isolation for CI/CD environments with untrusted workloads
-11. **Ownership transfer**: Allow instance owner to transfer ownership to another user
-12. **ACL-based permissions**: Fine-grained access control lists per instance (beyond group-based model)
+1. **Seccomp-like syscall filtering**: Restrict syscalls available to the emulator process
+2. **Address space layout randomization (ASLR)**: Randomize emulator memory layout
+3. **Instruction decoder fuzzing**: Automated fuzz testing of all instruction decoders
+4. **Kernel module signing**: Require signed modules before loading into emulated environment
+5. **Audit logging**: Log all security-relevant events (instance create/destroy, share mounts, crashes, permission denials)
+6. **Network traffic inspection**: Inspect guest network traffic for malicious patterns
+7. **Resource accounting**: Track CPU time, memory, disk I/O per instance
+8. **Secure snapshot encryption**: Encrypt snapshot files at rest
+9. **Multi-tenant isolation**: Stronger isolation for CI/CD environments with untrusted workloads
+10. **Ownership transfer**: Allow instance owner to transfer ownership to another user
+11. **ACL-based permissions**: Fine-grained access control lists per instance (beyond group-based model)
 
 ---
 
@@ -1377,22 +1699,26 @@ struct emu_crash_dump {
 | TC.27 | MMIO validation framework | Devices | NOT STARTED | | S4.1 | `usr.sbin/emu/emu_engine.c` | Validate offset, size, alignment |
 | TC.28 | Host-only networking | Network | NOT STARTED | | S4.4 | `usr.sbin/emu/emu_dev_net.c` | Internal virtual network only |
 | TC.29 | GDB stub on localhost only | Network | NOT STARTED | | S4.6 | `usr.sbin/emu/emu_gdb.c` | 127.0.0.1 binding |
-| TC.30 | Capsicum sandboxing | Hardening | NOT STARTED | | S5.1, S5.2 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `cap_enter()` after init |
-| TC.31 | File descriptor cleanup | Hardening | NOT STARTED | | S5.3 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | Close unnecessary FDs |
-| TC.32 | Instruction count limits | Hardening | NOT STARTED | | S5.4 | `usr.sbin/emu/emu_engine.c` | Prevent infinite loops |
-| TC.33 | Watchdog timer | Hardening | NOT STARTED | | S5.5 | `usr.sbin/emu/emu_engine.c` | Configurable timeout |
-| TC.34 | Memory management sysctls implemented | Memory | NOT STARTED | | 2.16 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval` |
-| TC.35 | Demand-paged guest memory (`mmap MAP_NORESERVE`) | Memory | NOT STARTED | | 5.18 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
-| TC.36 | virtio-balloon device for bhyve path | Memory | NOT STARTED | | 4.9 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
-| TC.37 | Per-instance `memory_used` tracking | Memory | NOT STARTED | | TC.34 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring |
-| TC.38 | Memory overcommit safeguards and warnings | Memory | NOT STARTED | | TC.34 | `sys/emulation/emu_memmgmt.c` | Host capacity check, threshold warning |
-| TC.39 | Access control unit tests written and passing | Testing | NOT STARTED | | TC.1–TC.13 | `tests/sys/emulation/acl_test.c` | Permission checks, ownership, limits |
-| TC.40 | Security unit tests written and passing | Testing | NOT STARTED | | TC.14–TC.19 | `tests/sys/emulation/security_test.c` | Bounds checking, ELF, crash |
-| TC.41 | Filesystem security tests written and passing | Testing | NOT STARTED | | TC.20–TC.26 | `tests/usr.sbin/emu/fs_security_test.sh` | Path traversal, symlink escape |
-| TC.42 | Device security tests written and passing | Testing | NOT STARTED | | TC.27–TC.29 | `tests/usr.sbin/emu/device_security_test.sh` | MMIO bounds, network isolation |
-| TC.43 | Memory management tests written and passing | Testing | NOT STARTED | | TC.34–TC.38 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit |
-| TC.44 | Fuzz testing of instruction decoder | Testing | NOT STARTED | | TC.16 | `tests/sys/emulation/fuzz_test.c` | Random instruction sequences |
-| TC.45 | Security documentation written | Documentation | NOT STARTED | | TC.39–TC.44 | `share/doc/emulation/security.md` | Threat model, guidelines |
+| TC.30 | Capsicum sandboxing for custom emulator | Hardening | NOT STARTED | | S5.1 | `usr.sbin/emu/emu_engine.c` | `emu_enter_sandbox()`: `cap_rights_limit()` on disk/console/GDB/snapshot FDs, close non-essential FDs, `cap_enter()`. See Section 6.5. |
+| TC.31 | Capsicum sandboxing for bhyve process | Hardening | NOT STARTED | | S5.2 | `usr.sbin/emu/emu_bhyve.c` | `emu_bhyve_enter_sandbox()`: `cap_rights_limit()` on VMM/disk/console FDs, `cap_ioctls_limit()` on VMM FD, close non-essential FDs, `cap_enter()`. See Section 6.5. |
+| TC.32 | File descriptor cleanup (essential FD helpers) | Hardening | NOT STARTED | | S5.3 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `emu_is_essential_fd()` / `emu_bhyve_is_essential_fd()` helpers. Close all FDs except disk, console, GDB, snapshot, VMM, and stdio. |
+| TC.33 | Instruction count limits per execution slice | Hardening | NOT STARTED | | S5.4 | `usr.sbin/emu/emu_engine.c` | Prevent infinite loops in guest code |
+| TC.34 | Watchdog timer for crash detection | Hardening | NOT STARTED | | S5.5 | `usr.sbin/emu/emu_engine.c` | Configurable timeout, trigger crash capture |
+| TC.35 | Memory management sysctls implemented | Memory | NOT STARTED | | 2.16 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent` |
+| TC.36 | Demand-paged guest memory (`mmap MAP_NORESERVE`) | Memory | NOT STARTED | | 5.18 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
+| TC.37 | virtio-balloon device for bhyve path | Memory | NOT STARTED | | 4.9 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
+| TC.38 | Per-instance `memory_used` tracking | Memory | NOT STARTED | | TC.35 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring via periodic RSS sampling |
+| TC.39 | Host memory capacity detection with system-wide awareness | Memory | NOT STARTED | | TC.35 | `sys/emulation/emu_memmgmt.c` | Read `hw.physmem` for total. Read `vm.stats.vm.*` for system-wide used (OS + other processes). Subtract emulation instances. Subtract `memory_system_reserve_percent` safety margin. |
+| TC.40 | Memory overcommit safeguards and warnings | Memory | NOT STARTED | | TC.39 | `sys/emulation/emu_memmgmt.c` | Compare total configured vs available capacity. Log warning at `memory_warn_percent` threshold. Include breakdown: total physical, system-wide used, instances, reserve, available. |
+| TC.41 | Access control unit tests written and passing | Testing | NOT STARTED | | TC.1–TC.13 | `tests/sys/emulation/acl_test.c` | Permission checks, ownership, limits |
+| TC.42 | Security unit tests written and passing | Testing | NOT STARTED | | TC.14–TC.19 | `tests/sys/emulation/security_test.c` | Bounds checking, ELF, crash |
+| TC.43 | Capsicum sandboxing unit tests written and passing | Testing | NOT STARTED | | TC.30, TC.31 | `tests/sys/emulation/capsicum_test.c` | `test_capsicum_enter()`, `test_capsicum_rights_limit()`, `test_emulator_runs_under_capsicum()` |
+| TC.44 | Capsicum sandboxing integration tests written and passing | Testing | NOT STARTED | | TC.43 | `tests/usr.sbin/emu/capsicum_integration_test.sh` | Start instance with sandboxing, verify correct operation under Capsicum |
+| TC.45 | Filesystem security tests written and passing | Testing | NOT STARTED | | TC.20–TC.26 | `tests/usr.sbin/emu/fs_security_test.sh` | Path traversal, symlink escape |
+| TC.46 | Device security tests written and passing | Testing | NOT STARTED | | TC.27–TC.29 | `tests/usr.sbin/emu/device_security_test.sh` | MMIO bounds, network isolation |
+| TC.47 | Memory management tests written and passing | Testing | NOT STARTED | | TC.35–TC.40 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, system-wide memory awareness |
+| TC.48 | Fuzz testing of instruction decoder | Testing | NOT STARTED | | TC.16 | `tests/sys/emulation/fuzz_test.c` | Random instruction sequences |
+| TC.49 | Security documentation written | Documentation | NOT STARTED | | TC.41–TC.48 | `share/doc/emulation/security.md` | Threat model, guidelines |
 
 ---
 
@@ -1402,7 +1728,7 @@ The emulation framework's security architecture is built on four layers of defen
 
 1. **Access control layer**: Root-only by default, group-based delegation via `emu` group, per-instance ownership, granular per-operation permissions, per-user resource limits, and jail integration ensure that only authorized users can create and manage emulated instances.
 
-2. **OS-level isolation**: Process boundaries, user privileges, file permissions, and (optionally) Capsicum sandboxing ensure that even if the emulator is compromised, the attacker gains only the privileges of an unprivileged user.
+2. **OS-level isolation**: Process boundaries, user privileges, file permissions, and Capsicum sandboxing ensure that even if the emulator is compromised, the attacker gains only the privileges of an unprivileged user.
 
 3. **Emulator-level isolation**: Bounds-checked memory access, validated ELF loading, safe instruction decoding, and input-validated device emulation prevent most attacks from succeeding within the emulator itself.
 
