@@ -267,6 +267,36 @@ emu_modules_loaded_sysctl_cleanup()
 	kldunload emu_core 2>/dev/null || true
 }
 
+#
+# Test MOD_LOAD with conflicting modules
+# Loading the same module twice should fail or be a no-op
+#
+atf_test_case emu_module_load_conflict cleanup
+emu_module_load_conflict_head()
+{
+	atf_set "descr" "Tests that loading a module twice is handled correctly"
+	atf_set "require.user" "root"
+	atf_set "require.kmods" "emu_core"
+}
+emu_module_load_conflict_body()
+{
+	# Load emu_core first time
+	atf_check -s exit:0 kldload emu_core
+
+	# Try to load again - should either succeed (already loaded) or fail gracefully
+	# In FreeBSD, kldload of an already loaded module returns success
+	atf_check -s exit:0 kldload emu_core
+
+	# Verify module is still loaded once
+	count=$(kldinfo -q emu_core | wc -l)
+	atf_check -s exit:0 -o "match:^1$" echo "$count"
+}
+emu_module_load_conflict_cleanup()
+{
+	# Ensure module is unloaded
+	kldunload emu_core 2>/dev/null || true
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case emu_module_unload_active
@@ -276,4 +306,5 @@ atf_init_test_cases()
 	atf_add_test_case emu_module_version_sysctl
 	atf_add_test_case emu_module_refcount_sysctl
 	atf_add_test_case emu_modules_loaded_sysctl
+	atf_add_test_case emu_module_load_conflict
 }
