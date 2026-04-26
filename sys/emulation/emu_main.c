@@ -46,6 +46,8 @@ void emu_sysctl_init(void);
 void emu_sysctl_destroy(void);
 void emu_instance_init(void);
 void emu_instance_destroy(void);
+void emu_stack_init(void);
+void emu_stack_destroy(void);
 
 /*
  * Emulation Framework Core Module (emu_core.ko)
@@ -179,6 +181,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 		/* Initialize instance management subsystem */
 		emu_instance_init();
 
+		/* Initialize stack capture infrastructure */
+		emu_stack_init();
+
 		/* Validate no conflicts */
 		/* XXX: Check for conflicting emulation frameworks */
 
@@ -205,6 +210,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 
 		/* Clean up instance management subsystem */
 		emu_instance_destroy();
+
+		/* Clean up stack capture infrastructure */
+		emu_stack_destroy();
 
 		/* Clean up sysctl infrastructure */
 		emu_sysctl_destroy();
