@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/sysctl.h>
 #include <sys/mutex.h>
 #include <sys/sbuf.h>
+#include <sys/priv.h>
 
 #include "emu.h"
 
@@ -61,6 +62,38 @@ struct emu_module_entry {
 static TAILQ_HEAD(, emu_module_entry) emu_module_list =
     TAILQ_HEAD_INITIALIZER(emu_module_list);
 static struct mtx emu_module_lock;
+
+/*
+ * kern.emulation.allow_nonroot - Master switch for non-root access
+ *
+ * When set to 1, allows non-root users in the emu group to use
+ * emulation features. When 0 (default), only root can use emulation.
+ */
+static int emu_allow_nonroot = 0;
+
+static int
+sysctl_emu_allow_nonroot(SYSCTL_HANDLER_ARGS)
+{
+	int error;
+	int newval;
+
+	newval = emu_allow_nonroot;
+	error = sysctl_handle_int(oidp, &newval, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+
+	/* Only root can change this setting */
+	if (priv_check(curthread, PRIV_ROOT) != 0)
+		return (EPERM);
+
+	emu_allow_nonroot = newval;
+
+	return (0);
+}
+
+SYSCTL_PROC(_kern_emulation, OID_AUTO, allow_nonroot, CTLTYPE_INT | CTLFLAG_RW,
+    &emu_allow_nonroot, 0, sysctl_emu_allow_nonroot, "I",
+    "Allow non-root users in emu group to use emulation (default 0)");
 
 /*
  * kern.emulation.modules_loaded - List all loaded emulation modules

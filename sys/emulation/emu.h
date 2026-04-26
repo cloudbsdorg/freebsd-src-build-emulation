@@ -45,6 +45,9 @@
 #define	EMU_INST_PAUSED		0x0004
 #define	EMU_INST_ERROR		0x0008
 
+/* Access control */
+#define	GID_EMU			979	/* Emulation framework group */
+
 /* Instance permissions */
 #define	EMU_PERM_CREATE		0x0001
 #define	EMU_PERM_DESTROY	0x0002
@@ -87,6 +90,12 @@ void	emu_module_deregister(const char *name);
 void	emu_module_refcount_inc(const char *name);
 void	emu_module_refcount_dec(const char *name);
 void	emu_sysctl_register_module(const char *name);
+
+/* Access control helpers */
+int	emu_check_priv(struct thread *td, int priv);
+int	emu_check_access(struct thread *td, uint64_t inst_id, int perm);
+int	emu_check_create(struct thread *td);
+int	emu_check_destroy(struct thread *td, uint64_t inst_id);
 #endif /* _KERNEL */
 
 #endif /* !_SYS_EMU_H_ */
