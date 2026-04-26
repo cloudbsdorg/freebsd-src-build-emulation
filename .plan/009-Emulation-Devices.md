@@ -4,6 +4,83 @@
 
 This document describes the device models that must be emulated for each target architecture. Devices are categorized by type and shared across architectures where possible.
 
+### Table of Contents
+
+- [1. Overview](#1-overview)
+  - [1.1 Device Sharing Matrix](#11-device-sharing-matrix)
+- [2. Serial / Console Devices](#2-serial--console-devices)
+  - [2.1 NS16550 UART](#21-ns16550-uart)
+  - [2.2 PL011 UART (ARM PrimeCell)](#22-pl011-uart-arm-primecell)
+- [3. Timer Devices](#3-timer-devices)
+  - [3.1 i8254 PIT](#31-i8254-pit)
+  - [3.2 HPET](#32-hpet)
+  - [3.3 ARM Generic Timer](#33-arm-generic-timer)
+  - [3.4 SP804 Timer](#34-sp804-timer)
+  - [3.5 PowerPC Decrementer](#35-powerpc-decrementer)
+- [4. Interrupt Controller Devices](#4-interrupt-controller-devices)
+  - [4.1 i8259 PIC](#41-i8259-pic)
+  - [4.2 I/O APIC](#42-io-apic)
+  - [4.3 LAPIC](#43-lapic)
+  - [4.4 GICv3](#44-gicv3)
+  - [4.5 GICv2](#45-gicv2)
+  - [4.6 CLINT](#46-clint)
+  - [4.7 PLIC](#47-plic)
+  - [4.8 OpenPIC](#48-openpic)
+- [5. Storage Devices](#5-storage-devices)
+  - [5.1 virtio-blk](#51-virtio-blk)
+  - [5.2 AHCI/SATA](#52-ahcisata)
+  - [5.3 USB Mass Storage](#53-usb-mass-storage)
+- [6. Network Devices](#6-network-devices)
+  - [6.1 virtio-net](#61-virtio-net)
+  - [6.2 NE2000 (ISA)](#62-ne2000-isa)
+  - [6.3 3Com 3c509 (ISA)](#63-3com-3c509-isa)
+  - [6.4 Intel e1000 (PCI)](#64-intel-e1000-pci)
+  - [6.5 RTL8139 (PCI)](#65-rtl8139-pci)
+  - [6.6 virtio-net-pci (Transitional)](#66-virtio-net-pci-transitional)
+- [7. Sound Devices](#7-sound-devices)
+  - [7.1 Sound Blaster 16 (ISA)](#71-sound-blaster-16-isa)
+  - [7.2 Intel HDA (PCI)](#72-intel-hda-pci)
+  - [7.3 AC97 (PCI)](#73-ac97-pci)
+- [8. USB Controllers & Devices](#8-usb-controllers--devices)
+  - [8.1 UHCI (USB 1.1)](#81-uhci-usb-11)
+  - [8.2 OHCI (USB 1.1)](#82-ohci-usb-11)
+  - [8.3 EHCI (USB 2.0)](#83-ehci-usb-20)
+  - [8.4 xHCI (USB 3.0)](#84-xhci-usb-30)
+  - [8.5 USB HID Devices](#85-usb-hid-devices)
+- [9. Display & Interaction Devices](#9-display--interaction-devices)
+  - [9.1 Simple Framebuffer](#91-simple-framebuffer)
+  - [9.2 VNC Display Server](#92-vnc-display-server)
+  - [9.3 RDP Display Server](#93-rdp-display-server)
+  - [9.4 Game Controllers](#94-game-controllers)
+- [10. Bus & Interconnect Devices](#10-bus--interconnect-devices)
+  - [10.1 FireWire (IEEE 1394)](#101-firewire-ieee-1394)
+  - [10.2 PCI Bus](#102-pci-bus)
+  - [10.3 ISA Bus](#103-isa-bus)
+- [11. RTC & System Devices](#11-rtc--system-devices)
+  - [11.1 MC146818 RTC](#111-mc146818-rtc)
+  - [11.2 PL031 RTC](#112-pl031-rtc)
+  - [11.3 ACPI Table Generation](#113-acpi-table-generation)
+- [12. Firmware Devices](#12-firmware-devices)
+  - [12.1 SeaBIOS (Legacy BIOS)](#121-seabios-legacy-bios)
+  - [12.2 OVMF (UEFI Firmware)](#122-ovmf-uefi-firmware)
+  - [12.3 U-Boot](#123-u-boot)
+  - [12.4 OpenSBI (RISC-V)](#124-opensbi-risc-v)
+- [13. Device I/O Ring Buffer Infrastructure](#13-device-io-ring-buffer-infrastructure)
+  - [13.1 Ring Buffer Design](#131-ring-buffer-design)
+  - [13.2 Ring Buffer Control](#132-ring-buffer-control)
+  - [13.3 Per-Device Ring Buffer Configuration](#133-per-device-ring-buffer-configuration)
+- [14. Device Driver Development Hooks](#14-device-driver-development-hooks)
+  - [14.1 Hook API Design](#141-hook-api-design)
+  - [14.2 Hook Registration](#142-hook-registration)
+  - [14.3 Hook Types](#143-hook-types)
+  - [14.4 Hook Lifecycle](#144-hook-lifecycle)
+- [15. Network Card Stubs (Passthrough Wrappers)](#15-network-card-stubs-passthrough-wrappers)
+  - [15.1 Stub Architecture](#151-stub-architecture)
+  - [15.2 Stub Implementation Pattern](#152-stub-implementation-pattern)
+- [16. Device Emulation Implementation Tasks](#16-device-emulation-implementation-tasks)
+- [17. Cross-References](#17-cross-references)
+- [18. Notes](#18-notes)
+
 ### 1.1 Device Sharing Matrix
 
 | Device | Type | Interface | amd64 | i386 | arm64 | arm | powerpc | riscv |
@@ -847,7 +924,338 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 
 ---
 
-## 9. Device Emulation Implementation Tasks
+## 13. Device I/O Ring Buffer Infrastructure
+
+Emulation can be significantly slower than real hardware, especially for cross-architecture emulation. To prevent device I/O from becoming a bottleneck or causing data loss, a ring buffer infrastructure is placed between each emulated device and the emulator engine.
+
+### 13.1 Ring Buffer Design
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
+│ Emulated    │────▶│ Device I/O       │────▶│ Backend     │
+│ Device      │     │ Ring Buffer      │     │ (host I/O)  │
+│ (guest side)│◀────│ (size configurable)│◀────│             │
+└─────────────┘     └──────────────────┘     └─────────────┘
+                          │
+                          ▼
+                    ┌──────────────┐
+                    │ Ring Buffer  │
+                    │ Control      │
+                    │ (on/off,     │
+                    │  size,       │
+                    │  watermark)  │
+                    └──────────────┘
+```
+
+**Key properties:**
+- **Lock-free single-producer single-consumer** design for performance
+- **Configurable size** per device (default: 64KB, max: 64MB)
+- **Watermark interrupts** — device can interrupt when buffer reaches a threshold
+- **Overwrite or block** on full — configurable per device
+- **Statistics** — bytes read/written, overruns, underruns, peak usage
+
+**Data structure:**
+
+```c
+struct emu_ringbuf {
+    uint8_t        *buf;           /* Ring buffer memory */
+    size_t          size;          /* Buffer size (power of 2) */
+    size_t          mask;          /* size - 1 (for fast modulo) */
+    volatile size_t head;          /* Producer index */
+    volatile size_t tail;          /* Consumer index */
+    bool            enabled;       /* Ring buffer on/off */
+    bool            overwrite;     /* Overwrite on full vs block */
+    size_t          watermark;     /* Interrupt threshold */
+    uint64_t        bytes_written; /* Statistics */
+    uint64_t        bytes_read;
+    uint64_t        overruns;      /* Data lost due to full buffer */
+    uint64_t        underruns;     /* Read when empty */
+    uint64_t        peak_usage;    /* Max bytes in buffer */
+};
+```
+
+### 13.2 Ring Buffer Control
+
+The ring buffer can be controlled per-device via sysctl or the `emu` CLI:
+
+```sh
+# Enable/disable ring buffer for a specific device
+sysctl hw.emulation.instance.test.dev.uart0.ringbuf.enable=1
+sysctl hw.emulation.instance.test.dev.uart0.ringbuf.enable=0
+
+# Configure ring buffer size
+sysctl hw.emulation.instance.test.dev.uart0.ringbuf.size=131072
+
+# Set watermark (interrupt when N bytes in buffer)
+sysctl hw.emulation.instance.test.dev.uart0.ringbuf.watermark=4096
+
+# Set overwrite behavior
+sysctl hw.emulation.instance.test.dev.uart0.ringbuf.overwrite=1
+
+# View statistics
+sysctl hw.emulation.instance.test.dev.uart0.ringbuf.stats
+```
+
+**CLI equivalents:**
+
+```sh
+# Enable ring buffer for all devices in an instance
+emu config --name test --ringbuf on
+
+# Disable ring buffer (direct passthrough, no buffering)
+emu config --name test --ringbuf off
+
+# Configure per-device ring buffer
+emu config --name test --device uart0 --ringbuf-size 131072
+emu config --name test --device virtio-blk0 --ringbuf-size 1048576
+```
+
+### 13.3 Per-Device Ring Buffer Configuration
+
+| Device Type | Default Size | Recommended Size | Notes |
+|-------------|-------------|------------------|-------|
+| UART (serial) | 64KB | 16KB-256KB | Console output, low bandwidth |
+| Sound (SB16/HDA/AC97) | 1MB | 256KB-4MB | Audio streaming, timing sensitive |
+| Network (all) | 512KB | 128KB-2MB | Packet bursts, latency sensitive |
+| Storage (virtio-blk/AHCI) | 4MB | 1MB-16MB | Block I/O, high bandwidth |
+| USB | 1MB | 256KB-4MB | Variable bandwidth |
+| Display (framebuffer) | 8MB | 4MB-64MB | Video memory, high bandwidth |
+| Game controllers | 16KB | 4KB-64KB | Low bandwidth, latency critical |
+
+**Ring buffer API:**
+
+```c
+/* Initialize ring buffer */
+int emu_ringbuf_init(struct emu_ringbuf *rb, size_t size);
+
+/* Destroy ring buffer */
+void emu_ringbuf_destroy(struct emu_ringbuf *rb);
+
+/* Write data (producer side — device → host) */
+size_t emu_ringbuf_write(struct emu_ringbuf *rb, const void *data, size_t len);
+
+/* Read data (consumer side — host → device) */
+size_t emu_ringbuf_read(struct emu_ringbuf *rb, void *data, size_t len);
+
+/* Check available space/bytes */
+size_t emu_ringbuf_avail(struct emu_ringbuf *rb);
+size_t emu_ringbuf_free(struct emu_ringbuf *rb);
+
+/* Enable/disable */
+void emu_ringbuf_enable(struct emu_ringbuf *rb);
+void emu_ringbuf_disable(struct emu_ringbuf *rb);
+
+/* Reset statistics */
+void emu_ringbuf_reset_stats(struct emu_ringbuf *rb);
+
+/* Check if ring buffer should trigger interrupt (watermark reached) */
+bool emu_ringbuf_should_interrupt(struct emu_ringbuf *rb);
+```
+
+**Implementation:** `sys/emulation/emu_ringbuf.c`, `sys/emulation/emu_ringbuf.h`
+
+---
+
+## 14. Device Driver Development Hooks
+
+When developing a device driver inside an emulated instance, the developer needs to observe and interact with the device's behavior. The hook API allows registering callbacks that fire on specific device events.
+
+### 14.1 Hook API Design
+
+```c
+/* Hook function signature */
+typedef void (*emu_dev_hook_fn)(struct emu_device *dev,
+                                enum emu_dev_hook_event event,
+                                void *hook_data,
+                                void *user_data);
+
+/* Hook events */
+enum emu_dev_hook_event {
+    EMU_DEV_HOOK_MMIO_READ,      /* Device register read */
+    EMU_DEV_HOOK_MMIO_WRITE,     /* Device register write */
+    EMU_DEV_HOOK_PIO_READ,       /* Port I/O read (x86) */
+    EMU_DEV_HOOK_PIO_WRITE,      /* Port I/O write (x86) */
+    EMU_DEV_HOOK_DMA_READ,       /* DMA read from device */
+    EMU_DEV_HOOK_DMA_WRITE,      /* DMA write to device */
+    EMU_DEV_HOOK_INTERRUPT_RAISE, /* Device raises interrupt */
+    EMU_DEV_HOOK_INTERRUPT_ACK,  /* Interrupt acknowledged */
+    EMU_DEV_HOOK_RESET,          /* Device reset */
+    EMU_DEV_HOOK_SAVE,           /* Save device state */
+    EMU_DEV_HOOK_RESTORE,        /* Restore device state */
+    EMU_DEV_HOOK_DESTROY,        /* Device being destroyed */
+};
+
+/* Hook registration */
+struct emu_dev_hook {
+    emu_dev_hook_fn   fn;
+    void             *user_data;
+    uint32_t          flags;       /* EMU_DEV_HOOK_F_ONESHOT, etc. */
+    STAILQ_ENTRY(emu_dev_hook) entries;
+};
+```
+
+### 14.2 Hook Registration
+
+```c
+/* Register a hook on a device */
+int emu_dev_hook_register(struct emu_device *dev,
+                          enum emu_dev_hook_event event,
+                          emu_dev_hook_fn fn,
+                          void *user_data,
+                          uint32_t flags);
+
+/* Unregister a hook */
+int emu_dev_hook_unregister(struct emu_device *dev,
+                            enum emu_dev_hook_event event,
+                            emu_dev_hook_fn fn);
+
+/* Fire a hook (called by device emulation code) */
+void emu_dev_hook_fire(struct emu_device *dev,
+                       enum emu_dev_hook_event event,
+                       void *hook_data);
+```
+
+### 14.3 Hook Types
+
+| Hook Type | Trigger | hook_data Contains | Use Case |
+|-----------|---------|-------------------|----------|
+| MMIO Read | Guest reads device register | `{offset, value, size}` | Trace driver register access |
+| MMIO Write | Guest writes device register | `{offset, value, size}` | Inject faults, log writes |
+| PIO Read | Guest reads I/O port (x86) | `{port, value, size}` | Trace legacy driver access |
+| PIO Write | Guest writes I/O port (x86) | `{port, value, size}` | Inject faults |
+| DMA Read | Device reads guest memory | `{gpa, len, buf}` | Trace DMA transfers |
+| DMA Write | Device writes guest memory | `{gpa, len, buf}` | Capture DMA output |
+| Interrupt Raise | Device asserts IRQ | `{irq, level}` | Measure interrupt latency |
+| Interrupt Ack | Guest acknowledges IRQ | `{irq}` | Track interrupt handling |
+| Reset | Device reset triggered | `{type}` | Verify reset behavior |
+| Save/Restore | State save/restore | `{buf, len}` | Debug snapshot issues |
+
+### 14.4 Hook Lifecycle
+
+```
+Driver Development Workflow:
+1. Developer writes device driver in emulated instance
+2. Developer registers hooks on the emulated device from the host side:
+     emu hook --name test --device virtio-blk0 --event mmio-write --script log_writes.sh
+3. Driver runs inside instance, accesses device registers
+4. Hooks fire on each access, logging to host console or file
+5. Developer analyzes hook output to verify driver behavior
+6. Developer iterates: modify driver, re-run, re-analyze
+
+CLI Interface:
+  emu hook --name <instance> --device <device> --event <event> [--script <path>] [--oneshot]
+  emu hook --name <instance> --device <device> --list
+  emu hook --name <instance> --device <device> --clear
+```
+
+**Implementation:** `usr.sbin/emu/emu_hook.c`, `sys/emulation/emu_hook.c`
+
+---
+
+## 15. Network Card Stubs (Passthrough Wrappers)
+
+Network card stubs present the appearance of a specific network card model to the guest OS while internally forwarding all traffic through a virtio-net backend on the host. This allows testing real network drivers without implementing the full hardware emulation.
+
+### 15.1 Stub Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Guest OS sees:                                      │
+│   Intel e1000 (PCI 00:03.0) or RTL8139 or NE2000    │
+│   Real PCI config space, real register layout        │
+│   Real DMA descriptors, real interrupt behavior      │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│ Stub Layer (register-level emulation only)           │
+│   - PCI config space (vendor/device ID, BARs, etc.) │
+│   - Register read/write (minimal state tracking)     │
+│   - Descriptor parsing (extract buffer addresses)    │
+│   - Interrupt generation (MSI/MSI-X/INTx)           │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│ virtio-net Backend (actual I/O)                      │
+│   - All packet I/O goes through virtio-net           │
+│   - Host tap interface or socket backend             │
+│   - MAC filtering, promiscuous mode                  │
+│   - Checksum offload, TSO, GRO                       │
+└─────────────────────────────────────────────────────┘
+```
+
+### 15.2 Stub Implementation Pattern
+
+Each network card stub follows this pattern:
+
+```c
+/* Stub: Intel e1000 */
+struct emu_dev_e1000_stub {
+    /* PCI config space */
+    uint16_t vendor_id;      /* 0x8086 (Intel) */
+    uint16_t device_id;      /* 0x100E (82540EM) */
+    uint32_t bar[6];         /* BAR0 = MMIO, BAR1 = Flash, BAR2 = I/O */
+    
+    /* Register state (minimal — enough to make driver work) */
+    uint32_t regs[0x8000];   /* Memory-mapped registers */
+    uint32_t eeprom[64];     /* EEPROM contents */
+    
+    /* Descriptor rings (tracked for DMA) */
+    struct e1000_tx_desc *tx_ring;
+    struct e1000_rx_desc *rx_ring;
+    uint32_t tx_ring_addr;
+    uint32_t rx_ring_addr;
+    
+    /* Backend link */
+    struct emu_virtio_net_backend *backend;
+    
+    /* Ring buffer for I/O */
+    struct emu_ringbuf *ringbuf;
+};
+```
+
+**Stub implementation steps for each NIC:**
+
+1. **PCI config space**: Implement vendor ID, device ID, revision, BARs, subsystem IDs, capabilities (MSI, MSI-X, PCIe)
+2. **Register map**: Implement the subset of registers needed for the driver to initialize and send/receive packets
+3. **Descriptor parsing**: Parse the NIC-specific descriptor format, extract buffer addresses from guest memory
+4. **DMA translation**: Convert guest-physical addresses to host-virtual for descriptor buffers
+5. **Backend bridge**: Forward packet data to/from the virtio-net backend
+6. **Interrupt mapping**: Map NIC-specific interrupt events to the virtio-net interrupt model
+
+**NIC-specific details:**
+
+| NIC | Vendor:Device | Register Space | Descriptor Format | Key Features |
+|-----|---------------|----------------|-------------------|--------------|
+| NE2000 (ISA) | 0x10EC:0x8029 | I/O ports 0x300-0x31F | Ring buffer (6 TX, 6 RX) | 10Mbps, simple, well-documented |
+| 3Com 3c509 (ISA) | 0x10B7:0x509 | I/O ports 0x200-0x20F | DMA descriptors | 10Mbps, ID port for detection |
+| Intel e1000 | 0x8086:0x100E | MMIO 128KB | Circular descriptor rings | 1Gbps, multiple queues, VLAN, checksum offload |
+| RTL8139 | 0x10EC:0x8139 | I/O ports + MMIO | Simple ring + descriptor | 100Mbps, very common, well-understood |
+| virtio-net-pci | 0x1AF4:0x1000 | PCI + virtio BAR | virtqueue descriptors | Transitional model, modern |
+
+**CLI usage:**
+
+```sh
+# Start instance with a specific NIC stub
+emu start --name test --arch amd64 --nic e1000
+
+# Start with legacy ISA NIC
+emu start --name win95-test --arch i386 --nic ne2000
+
+# Start with multiple NICs of different types
+emu start --name test --arch amd64 \
+    --nic e1000 --nic rtl8139
+
+# List available NIC stubs
+emu blob list --arch amd64 --nic-models
+```
+
+**Implementation:** `usr.sbin/emu/emu_dev_nic_stub.c`, `usr.sbin/emu/emu_dev_nic_stub.h`
+
+---
+
+## 16. Device Emulation Implementation Tasks
 
 | # | Task | Status | Assigned To | Dependencies | Files | Notes |
 |---|------|--------|-------------|--------------|-------|-------|
@@ -878,12 +1286,39 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | DEV.25 | Implement OpenSBI firmware loading | NOT STARTED | | DEV.24 | `usr.sbin/emu/emu_firmware.c` | Load OpenSBI binary from blob cache via `emu_blob_resolve()`. SBI services. RISC-V M-mode. See `010-Emulation-Blob-Management.md`. |
 | DEV.26 | Write device emulation unit tests | NOT STARTED | | DEV.1-DEV.25 | `tests/usr.sbin/emu/device/` | Test each device: register read/write, interrupt generation, data transfer. |
 | DEV.27 | Write device integration tests | NOT STARTED | | DEV.26 | `tests/usr.sbin/emu/device_integration.sh` | Boot FreeBSD in emulator. Verify console output. Verify disk access. Verify network. |
+| DEV.28 | Implement ring buffer infrastructure | NOT STARTED | | | `sys/emulation/emu_ringbuf.c` | Lock-free SPSC ring buffer. Configurable size, watermark, overwrite. Statistics. Sysctl interface. |
+| DEV.29 | Implement device driver hook API | NOT STARTED | | DEV.28 | `usr.sbin/emu/emu_hook.c`, `sys/emulation/emu_hook.c` | Hook registration/fire/unregister. MMIO, PIO, DMA, interrupt events. CLI interface. |
+| DEV.30 | Implement Sound Blaster 16 (ISA) emulation | NOT STARTED | | | `usr.sbin/emu/emu_dev_sb16.c` | I/O ports 0x220-0x22F. DSP v4.05. 8/16-bit DMA. FM synthesis (OPL3). Ring buffer for audio. |
+| DEV.31 | Implement Intel HDA (PCI) emulation | NOT STARTED | | DEV.30 | `usr.sbin/emu/emu_dev_hda.c` | PCI 0x8086:0x2668. CORB/RIRB. DMA engines. Multi-stream. Ring buffer for audio. |
+| DEV.32 | Implement AC97 (PCI) emulation | NOT STARTED | | DEV.30 | `usr.sbin/emu/emu_dev_ac97.c` | PCI 0x8086:0x2415. I/O + MMIO. PCM in/out. Mixer. Ring buffer for audio. |
+| DEV.33 | Implement NE2000 (ISA) NIC stub | NOT STARTED | | DEV.18 | `usr.sbin/emu/emu_dev_nic_stub.c` | I/O ports 0x300-0x31F. Ring buffer DMA. virtio-net backend bridge. |
+| DEV.34 | Implement 3Com 3c509 (ISA) NIC stub | NOT STARTED | | DEV.18 | `usr.sbin/emu/emu_dev_nic_stub.c` | I/O ports 0x200-0x20F. ID port. DMA descriptors. virtio-net backend bridge. |
+| DEV.35 | Implement Intel e1000 (PCI) NIC stub | NOT STARTED | | DEV.18 | `usr.sbin/emu/emu_dev_nic_stub.c` | PCI 0x8086:0x100E. MMIO 128KB. Circular descriptors. MSI/MSI-X. virtio-net backend. |
+| DEV.36 | Implement RTL8139 (PCI) NIC stub | NOT STARTED | | DEV.18 | `usr.sbin/emu/emu_dev_nic_stub.c` | PCI 0x10EC:0x8139. I/O + MMIO. Simple ring. virtio-net backend bridge. |
+| DEV.37 | Implement virtio-net-pci (transitional) NIC stub | NOT STARTED | | DEV.18 | `usr.sbin/emu/emu_dev_nic_stub.c` | PCI 0x1AF4:0x1000. Transitional model. virtio-net backend. |
+| DEV.38 | Implement UHCI (USB 1.1) controller | NOT STARTED | | | `usr.sbin/emu/emu_dev_usb.c` | PCI 0x8086:0x7020. I/O ports. Frame list. TD/QH processing. Root hub. |
+| DEV.39 | Implement OHCI (USB 1.1) controller | NOT STARTED | | DEV.38 | `usr.sbin/emu/emu_dev_usb.c` | PCI 0x106B:0x003F. MMIO. ED/TD processing. Periodic list. Root hub. |
+| DEV.40 | Implement EHCI (USB 2.0) controller | NOT STARTED | | DEV.39 | `usr.sbin/emu/emu_dev_usb.c` | PCI 0x8086:0x24CD. MMIO. Periodic/asynchronous schedule. iTD/siTD. Root hub. |
+| DEV.41 | Implement xHCI (USB 3.0) controller | NOT STARTED | | DEV.40 | `usr.sbin/emu/emu_dev_usb.c` | PCI 0x8086:0x8C31. MMIO 64KB. Slot/endpoint context. TRB ring. Root hub. |
+| DEV.42 | Implement USB HID keyboard/mouse emulation | NOT STARTED | | DEV.38-DEV.41 | `usr.sbin/emu/emu_dev_usb_hid.c` | USB HID boot protocol. Report descriptor. Key/mouse event injection. |
+| DEV.43 | Implement USB HID gamepad emulation | NOT STARTED | | DEV.42 | `usr.sbin/emu/emu_dev_usb_hid.c` | USB HID gamepad descriptor. Axis/button mapping. Configurable via config file. |
+| DEV.44 | Implement USB mass storage emulation | NOT STARTED | | DEV.38-DEV.41 | `usr.sbin/emu/emu_dev_usb_storage.c` | USB BOT (bulk-only transport). SCSI command passthrough. Disk image backing. |
+| DEV.45 | Implement FireWire (IEEE 1394) controller | NOT STARTED | | | `usr.sbin/emu/emu_dev_firewire.c` | PCI 0x104C:0x8023. OHCI-1394. Asynchronous/isochronous DMA. Config ROM. |
+| DEV.46 | Implement simple framebuffer display | NOT STARTED | | | `usr.sbin/emu/emu_dev_fb.c` | MMIO framebuffer. VESA-like modes. Console text output. Pixel data via shared memory. |
+| DEV.47 | Implement VNC display server | NOT STARTED | | DEV.46 | `usr.sbin/emu/emu_dev_vnc.c` | RFB protocol. Framebuffer → VNC. Keyboard/mouse input. Configurable port. |
+| DEV.48 | Implement RDP display server | NOT STARTED | | DEV.46 | `usr.sbin/emu/emu_dev_rdp.c` | RDP protocol. Framebuffer → RDP. Keyboard/mouse input. Configurable port. |
+| DEV.49 | Write ring buffer unit tests | NOT STARTED | | DEV.28 | `tests/sys/emulation/ringbuf_test.c` | Test SPSC correctness. Test watermark interrupt. Test overwrite vs block. Test statistics. Test enable/disable. |
+| DEV.50 | Write hook API unit tests | NOT STARTED | | DEV.29 | `tests/usr.sbin/emu/hook_test.c` | Test register/unregister. Test event firing. Test oneshot. Test multiple hooks. |
+| DEV.51 | Write NIC stub integration tests | NOT STARTED | | DEV.33-DEV.37 | `tests/usr.sbin/emu/nic_stub_test.sh` | Test each NIC stub: ping, iperf, MAC filtering. Verify driver loads in guest. |
+| DEV.52 | Write sound device integration tests | NOT STARTED | | DEV.30-DEV.32 | `tests/usr.sbin/emu/sound_test.sh` | Test audio playback/capture. Verify ring buffer operation. Test enable/disable. |
+| DEV.53 | Write USB device integration tests | NOT STARTED | | DEV.38-DEV.44 | `tests/usr.sbin/emu/usb_test.sh` | Test USB keyboard, mouse, storage. Test all controller types. Test hotplug. |
+| DEV.54 | Write display server integration tests | NOT STARTED | | DEV.46-DEV.48 | `tests/usr.sbin/emu/display_test.sh` | Test VNC/RDP connection. Test framebuffer updates. Test input forwarding. |
 
 ---
 
-## 10. Cross-References
+## 17. Cross-References
 
-### 10.1 Related Plan Documents
+### 17.1 Related Plan Documents
 
 | Document | Relationship |
 |----------|-------------|
@@ -897,7 +1332,7 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | `008-Emulation-Arch-riscv.md` | RISC-V device requirements (CLINT, PLIC, NS16550). |
 | `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware blobs (SeaBIOS, OVMF, U-Boot, OpenSBI, DTB). |
 
-### 10.2 Reference Materials
+### 17.2 Reference Materials
 
 | Resource | URL / Path | Use |
 |----------|------------|-----|
@@ -918,10 +1353,25 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | OVMF (TianoCore) | https://github.com/tianocore | UEFI firmware |
 | U-Boot | https://github.com/u-boot/u-boot | Boot loader |
 | OpenSBI | https://github.com/riscv-software-src/opensbi | RISC-V M-mode firmware |
+| Sound Blaster 16 DSP docs | https://wiki.osdev.org/Sound_Blaster_16 | SB16 register map, DSP commands |
+| Intel HDA specification | https://www.intel.com/content/www/us/en/standards/high-definition-audio-specification.html | HDA register map, CORB/RIRB |
+| AC97 specification | https://www.intel.com/ | AC97 register map, mixer |
+| NE2000 datasheet | https://wiki.osdev.org/NE2000 | NE2000 register map, ring buffer |
+| 3Com 3c509 datasheet | https://wiki.osdev.org/3Com_3c509 | 3c509 register map, ID port |
+| Intel e1000 datasheet | https://www.intel.com/ | e1000 register map, descriptors |
+| RTL8139 datasheet | https://www.realtek.com/ | RTL8139 register map |
+| UHCI specification | https://www.intel.com/ | USB 1.1 host controller |
+| OHCI specification | https://www.intel.com/ | USB 1.1 open host controller |
+| EHCI specification | https://www.intel.com/ | USB 2.0 enhanced host controller |
+| xHCI specification | https://www.intel.com/ | USB 3.0 eXtensible host controller |
+| USB HID specification | https://www.usb.org/hid | HID report descriptor, boot protocol |
+| IEEE 1394 (FireWire) OHCI spec | https://www.1394ta.org/ | FireWire register map, DMA |
+| RFB (VNC) protocol | https://github.com/rfbproto/rfbproto | VNC framebuffer protocol |
+| RDP protocol | https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/ | Remote Desktop Protocol |
 
 ---
 
-## 11. Notes
+## 18. Notes
 
 - **Start simple**: Begin with NS16550 UART, virtio-blk, and the arch-specific interrupt controller. These are sufficient to boot FreeBSD.
 - **Add complexity later**: HPET, ACPI, AHCI, and network can be added after basic boot works.
@@ -929,3 +1379,8 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 - **Device tree generation**: For ARM and RISC-V, the device tree blob (DTB) must describe all emulated devices and their MMIO addresses.
 - **ACPI generation**: For x86, ACPI tables must be generated dynamically based on instance configuration (number of CPUs, memory size, etc.).
 - **Interrupt routing**: Each device's interrupt must be correctly routed to the arch-specific interrupt controller. Document the IRQ assignments clearly.
+- **Ring buffer for emulation speed**: The device I/O ring buffer (Section 13) is critical for cross-architecture emulation where the emulator runs slower than real hardware. Enable it by default for sound, network, and storage devices. Disable for latency-critical devices (UART console, game controllers).
+- **NIC stubs for driver development**: Network card stubs (Section 15) allow testing real NIC drivers without implementing full hardware emulation. The stub translates NIC-specific register access to virtio-net backend calls.
+- **Device driver hooks for debugging**: The hook API (Section 14) enables tracing all device register access from the host side. Use `emu hook --name <instance> --device <dev> --event mmio-write --script log.sh` during driver development.
+- **USB controller selection**: UHCI (Intel) and OHCI (Compaq) are USB 1.1 with different register interfaces. EHCI is USB 2.0. xHCI is USB 3.0. Most modern OSes support xHCI. Legacy OSes (Windows 98, NT 4.0) need UHCI or OHCI.
+- **Display protocol selection**: VNC is simpler and more widely supported. RDP provides better compression and performance. The simple framebuffer (MMIO) is sufficient for console-only operation.
