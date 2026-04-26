@@ -60,13 +60,11 @@ void emu_sysctl_destroy(void);
 #define EMU_CORE_VERSION	1
 MODULE_VERSION(emu_core, EMU_CORE_VERSION);
 
-/* Module dependencies - will be filled by sub-modules */
-MODULE_DEPEND(emu_core, emu_amd64, 1, 1, 1);
-MODULE_DEPEND(emu_core, emu_i386, 1, 1, 1);
-MODULE_DEPEND(emu_core, emu_aarch64, 1, 1, 1);
-MODULE_DEPEND(emu_core, emu_arm, 1, 1, 1);
-MODULE_DEPEND(emu_core, emu_powerpc, 1, 1, 1);
-MODULE_DEPEND(emu_core, emu_riscv, 1, 1, 1);
+/*
+ * Module dependencies - architecture modules depend on emu_core
+ * These are declared in the arch modules, not here
+ * (emu_amd64, emu_i386, etc. will declare MODULE_DEPEND on emu_core)
+ */
 
 /*
  * Instance Registry
@@ -235,4 +233,3 @@ static moduledata_t emu_core_mod = {
 };
 
 DECLARE_MODULE(emu_core, emu_core_mod, SI_SUB_KLD, SI_ORDER_ANY);
-MODULE_DEPEND(emu_core, emu_core, 1, 1, 1);
