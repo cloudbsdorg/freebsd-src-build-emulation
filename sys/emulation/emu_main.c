@@ -44,6 +44,8 @@ MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
 /* Forward declarations */
 void emu_sysctl_init(void);
 void emu_sysctl_destroy(void);
+void emu_instance_init(void);
+void emu_instance_destroy(void);
 
 /*
  * Emulation Framework Core Module (emu_core.ko)
@@ -174,6 +176,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 		/* Initialize sysctl infrastructure */
 		emu_sysctl_init();
 
+		/* Initialize instance management subsystem */
+		emu_instance_init();
+
 		/* Validate no conflicts */
 		/* XXX: Check for conflicting emulation frameworks */
 
@@ -197,6 +202,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 			return (EBUSY);
 		}
 		mtx_unlock(&emu_instance_lock);
+
+		/* Clean up instance management subsystem */
+		emu_instance_destroy();
 
 		/* Clean up sysctl infrastructure */
 		emu_sysctl_destroy();

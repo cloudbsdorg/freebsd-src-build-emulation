@@ -63,6 +63,22 @@ int	emu_instance_count(void);
 int	emu_instance_register(void);
 void	emu_instance_deregister(void);
 
+/* Instance lifecycle management */
+int	emu_instance_create(const char *name, uid_t uid, gid_t gid,
+		    uint64_t memory_limit, uint64_t cpu_time_limit,
+		    uint64_t *inst_id_out);
+int	emu_instance_destroy(uint64_t inst_id);
+int	emu_instance_start(uint64_t inst_id);
+int	emu_instance_stop(uint64_t inst_id);
+int	emu_instance_get_state(uint64_t inst_id);
+void	emu_instance_update_memory(uint64_t inst_id, uint64_t memory_used);
+void	emu_instance_update_cpu_time(uint64_t inst_id, uint64_t cpu_time);
+int	emu_instance_check_cpu_limit(uint64_t inst_id);
+int	emu_instance_get_info(uint64_t inst_id, struct sbuf *sb);
+int	emu_instance_total_count(void);
+void	emu_instance_init(void);
+void	emu_instance_destroy(void);
+
 /* Sysctl interface */
 void	emu_sysctl_init(void);
 void	emu_sysctl_destroy(void);
