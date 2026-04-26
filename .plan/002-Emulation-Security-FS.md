@@ -51,19 +51,23 @@ The core security principle is **host safety**: kernel module testing must never
 | **Unauthorized instance access** | Non-owner user accesses or modifies another user's instance | Both | High | Medium (with access controls) |
 | **Privilege escalation via emu group** | User in emu group escalates to root via emulator bug | Both | Critical | Low (with privilege dropping) |
 | **Instance resource theft** | User creates excessive instances to deny service to others | Both | Medium | Medium (with per-user limits) |
+| **Malicious module loading** | Attacker loads a malicious emulation kernel module (`emu_*.ko`) to gain kernel-level access | Kernel | Critical | Low (root-only kldload, signed modules) |
+| **Module unloading crash** | Unloading an emulation module while instances are active causes kernel panic | Kernel | High | Low (refcount tracking, busy check) |
+| **Module version mismatch** | Incompatible module versions loaded together cause undefined behavior | Kernel | Medium | Low (MODULE_VERSION/MODULE_DEPEND checks) |
 
 ### 2.3 Attack Surface Comparison
 
 | Component | bhyve Path | Custom Emulator Path |
 |-----------|-----------|---------------------|
-| Kernel component | `vmm.ko` (mature, well-audited) | `emulation.ko` (new, smaller surface) |
+| Kernel component | `vmm.ko` (mature, well-audited) | `emu_core.ko` + `emu_<arch>.ko` (new, modular, smaller per-module surface) |
 | Userland process | `bhyve` process (mature) | `emu` process (new) |
-| CPU emulation | Hardware (VT-x/AMD-V) | Software instruction decoder |
+| CPU emulation | Hardware (VT-x/AMD-V) | Software instruction decoder (in `emu_<arch>.ko`) |
 | Memory isolation | EPT/NPT (hardware) | Process address space (software) |
 | Device emulation | In bhyve userland process | In emu userland process |
 | IOMMU protection | Yes (VT-d/AMD-Vi) | N/A (no passthrough) |
 | Attack surface | Large (full device models) | Small (minimal device models) |
 | Access control | devfs permissions + privilege checks | devfs permissions + privilege checks + granular per-op ACL |
+| Module loading | Single `vmm.ko` | Hierarchical: `emu.ko` (master) → `emu_core.ko` + `emu_<arch>.ko` |
 
 ---
 
@@ -87,13 +91,17 @@ The core security principle is **host safety**: kernel module testing must never
 │  │  └───────────┬───────────────┘   │  │  │  - Runs as         │  │  │
 │  │              │                    │  │  │    unprivileged    │  │  │
 │  │  ┌───────────▼───────────────┐   │  │  │    user            │  │  │
-│  │  │  vmm.ko (kernel module)   │   │  │  └────────────────────┘  │  │
-│  │  │  - VMCS/VMCB management   │   │  │                          │  │
-│  │  │  - EPT/NPT page tables    │   │  │  No kernel component     │  │
-│  │  │  - VM exit dispatch       │   │  │  for pure emulation      │  │
-│  │  │  - IOMMU protection       │   │  │                          │  │
-│  │  └───────────────────────────┘   │  └──────────────────────────┘  │
-│  └─────────────────────────────────┘                                │
+│  │  │  vmm.ko (kernel module)   │   │  │  └────────┬───────────┘  │  │
+│  │  │  - VMCS/VMCB management   │   │  │           │              │  │
+│  │  │  - EPT/NPT page tables    │   │  │  ┌────────▼───────────┐  │  │
+│  │  │  - VM exit dispatch       │   │  │  │  Kernel Modules:   │  │  │
+│  │  │  - IOMMU protection       │   │  │  │  emu_core.ko       │  │  │
+│  │  └───────────────────────────┘   │  │  │  emu_amd64.ko      │  │  │
+│  └─────────────────────────────────┘  │  │  emu_aarch64.ko    │  │  │
+│                                       │  │  emu_riscv.ko      │  │  │
+│                                       │  │  (loaded via kldload)│  │
+│                                       │  └────────────────────┘  │
+│                                       └──────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -102,7 +110,7 @@ The core security principle is **host safety**: kernel module testing must never
 The custom emulator runs as a **regular userland process** with no special privileges:
 
 - **No root required**: The emulator process runs as the invoking user
-- **No kernel component needed**: Pure emulation requires no kernel module
+- **Kernel modules provide CPU emulation**: `emu_core.ko` and `emu_<arch>.ko` provide the CPU emulation logic in kernel space, while the userland `emu` process handles device emulation and orchestration
 - **Standard process isolation**: The OS enforces process boundaries via virtual memory, file descriptors, and process credentials
 - **No /dev/vmm access**: The custom emulator does not use the VMM interface
 - **Capsicum sandboxing**: The emulator process is further restricted using FreeBSD's Capsicum capability mode (`cap_enter()`) to drop privileges after initialization. See Section 6.5 for full implementation details.
@@ -157,6 +165,117 @@ Create → Start → [Running] → Stop → Destroy
   │        └── Fork child process
   └── Validate config, check resources, check permissions
 ```
+
+### 3.5 Kernel Module Security
+
+The emulation framework is implemented as a hierarchy of loadable kernel modules. This introduces specific security considerations:
+
+**Module hierarchy:**
+```
+emu.ko (master, no code, only MODULE_DEPEND declarations)
+  └── emu_core.ko (core framework: instance registry, sysctl, VMM interface)
+        ├── emu_amd64.ko (amd64 CPU emulation)
+        ├── emu_aarch64.ko (arm64 CPU emulation)
+        ├── emu_arm.ko (arm 32-bit CPU emulation)
+        ├── emu_i386.ko (i386 CPU emulation)
+        ├── emu_powerpc.ko (powerpc CPU emulation)
+        └── emu_riscv.ko (riscv CPU emulation)
+```
+
+**Module loading security:**
+
+| Concern | Mitigation |
+|---------|------------|
+| Unauthorized module loading | `kldload` requires root privilege by default. `kern.module.allow_nonroot` sysctl (default 0) controls non-root loading. |
+| Malicious module injection | FreeBSD supports signed kernel modules via `MODULE_VERIFICATION` (KLD verification with public-key crypto). All `emu_*.ko` modules should be signed. |
+| Module unloading while in use | Each module tracks active instances via reference counting. `emu_core.ko` refuses to unload if any instances exist. Arch modules refuse to unload if instances of that architecture are active. |
+| Module version mismatch | `MODULE_VERSION` and `MODULE_DEPEND` macros enforce version compatibility. `emu_amd64.ko` declares `MODULE_DEPEND(emu_amd64, emu_core, 1, 1, 1)` requiring `emu_core.ko` version 1 exactly. |
+| Module loading order | `MODULE_DEPEND` ensures correct loading order. Loading `emu_amd64.ko` automatically loads `emu_core.ko` first. |
+| Module unloading order | The kernel's module dependency system prevents unloading `emu_core.ko` while `emu_amd64.ko` is still loaded. |
+
+**Module initialization security:**
+```c
+/* Each module's modevent handler validates state before initialization */
+static int
+emu_core_modevent(module_t mod, int type, void *unused)
+{
+    int error = 0;
+
+    switch (type) {
+    case MOD_LOAD:
+        /* Validate no conflicting modules are loaded */
+        if (emu_conflicting_modules()) {
+            printf("emu_core: conflicting module detected\n");
+            return (EINVAL);
+        }
+        /* Initialize instance registry with mutex */
+        emu_instance_init();
+        /* Create sysctl tree under kern.emulation */
+        emu_sysctl_init();
+        /* Register devfs device /dev/emuctl */
+        emu_devfs_init();
+        break;
+    case MOD_UNLOAD:
+        /* Refuse unload if any instances exist */
+        if (emu_instance_count() > 0) {
+            printf("emu_core: %d instances still active, refusing unload\n",
+                emu_instance_count());
+            return (EBUSY);
+        }
+        /* Clean up devfs, sysctl, instance registry */
+        emu_devfs_cleanup();
+        emu_sysctl_cleanup();
+        emu_instance_cleanup();
+        break;
+    }
+    return (error);
+}
+```
+
+**Per-architecture module security:**
+```c
+/* Arch module modevent — validates arch support before loading */
+static int
+emu_amd64_modevent(module_t mod, int type, void *unused)
+{
+    int error = 0;
+
+    switch (type) {
+    case MOD_LOAD:
+        /* Verify host CPU supports required features */
+        if (!cpu_feature & CPUID_EMULATION_AMD64) {
+            printf("emu_amd64: host CPU does not support required features\n");
+            return (ENODEV);
+        }
+        /* Register amd64 CPU emulation handlers with emu_core */
+        emu_arch_register(EMU_ARCH_AMD64, &amd64_emu_ops);
+        break;
+    case MOD_UNLOAD:
+        /* Refuse unload if amd64 instances are active */
+        if (emu_arch_instance_count(EMU_ARCH_AMD64) > 0) {
+            printf("emu_amd64: %d amd64 instances active, refusing unload\n",
+                emu_arch_instance_count(EMU_ARCH_AMD64));
+            return (EBUSY);
+        }
+        /* Unregister handlers */
+        emu_arch_unregister(EMU_ARCH_AMD64);
+        break;
+    }
+    return (error);
+}
+```
+
+**Module visibility and introspection:**
+- `kldstat` shows all loaded emulation modules with their versions
+- `kern.emulation.modules_loaded` sysctl provides a comma-separated list
+- `kern.emulation.module.<name>.version` sysctl shows individual module versions
+- `kern.emulation.module.<name>.refcount` sysctl shows how many instances depend on each module
+
+**Module unloading safety:**
+- The master `emu.ko` module has no code and no MOD_UNLOAD handler — it can only be unloaded after all dependent modules are unloaded
+- `emu_core.ko` refuses unload if any instances exist (checked via `emu_instance_count()`)
+- Arch modules refuse unload if instances of that architecture are active
+- The kernel's module dependency system prevents unloading modules that have dependents
 
 ---
 
@@ -1393,10 +1512,31 @@ The host must never be affected by a guest crash:
 | SC.36 | `kern.emulation.sandbox_strict` sysctl implemented | Hardening | NOT STARTED | | SC.35 | `sys/emulation/emu_sysctl.c` | Strict mode: fail on Capsicum error (default 0) |
 | SC.37 | Capsicum sandboxing unit tests written and passing | Testing | NOT STARTED | | SC.32–SC.36 | `tests/sys/emulation/capsicum_test.c` | `test_capsicum_enter()`, `test_capsicum_rights_limit()`, `test_emulator_runs_under_capsicum()` |
 | SC.38 | Capsicum sandboxing integration tests written and passing | Testing | NOT STARTED | | SC.37 | `tests/usr.sbin/emu/capsicum_integration_test.sh` | End-to-end Capsicum sandboxing scenarios |
+| SC.39 | `emu_core.ko` modevent handler with instance refcount implemented | Kernel Module | NOT STARTED | | S0.1 | `sys/emulation/emu_main.c` | MOD_UNLOAD refuses if instances active |
+| SC.40 | Per-arch module modevent handlers implemented | Kernel Module | NOT STARTED | | S0.2 | `sys/emulation/*/emu_cpu_*.c` | MOD_UNLOAD refuses if arch instances active |
+| SC.41 | `MODULE_DEPEND` declarations for all emulation modules | Kernel Module | NOT STARTED | | S0.3 | `sys/modules/emu*/Makefile` | Master module depends on all sub-modules |
+| SC.42 | `emu.ko` master module implemented | Kernel Module | NOT STARTED | | S0.4 | `sys/modules/emu/Makefile` | `kldload emu` loads all emulation modules |
+| SC.43 | Module visibility sysctls implemented | Kernel Module | NOT STARTED | | S0.5–S0.7 | `sys/emulation/emu_sysctl.c` | `modules_loaded`, `module.<name>.version`, `module.<name>.refcount` |
+| SC.44 | Module unloading safety tests written and passing | Testing | NOT STARTED | | S0.8 | `tests/sys/emulation/module_test.c` | Active instance refusal, dependency chain, kldload emu |
 
 ---
 
 ## 11. Implementation Phases — Security, Access Control & Filesystem
+
+### Phase S0: Kernel Module Security Infrastructure
+
+**Objective:** Implement the kernel module loading, unloading, and dependency security for the emulation framework.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S0.1 | Implement `emu_core.ko` modevent handler with instance refcount | NOT STARTED | | | | | 2.2 | `sys/emulation/emu_main.c` | `emu_core_modevent()`: MOD_LOAD validates no conflicts, initializes registry/sysctl/devfs. MOD_UNLOAD refuses if `emu_instance_count() > 0`. |
+| S0.2 | Implement per-arch module modevent handlers | NOT STARTED | | | | | 3.1–3.12 | `sys/emulation/*/emu_cpu_*.c` | Each arch module's modevent: MOD_LOAD registers handlers with emu_core, MOD_UNLOAD refuses if arch instances active. |
+| S0.3 | Implement `MODULE_DEPEND` declarations for all modules | NOT STARTED | | | | | S0.1, S0.2 | `sys/modules/emu*/Makefile` | `emu.ko` depends on all sub-modules. Each arch module depends on `emu_core.ko`. Version checks via `MODULE_VERSION`. |
+| S0.4 | Implement `emu.ko` master module (no code, only dependencies) | NOT STARTED | | | | | S0.3 | `sys/modules/emu/Makefile` | Master module with no source files. Only `MODULE_DEPEND` declarations. `kldload emu` loads all emulation modules. |
+| S0.5 | Implement `kern.emulation.modules_loaded` sysctl | NOT STARTED | | | | | S0.1 | `sys/emulation/emu_sysctl.c` | Read-only sysctl listing all loaded emulation modules. |
+| S0.6 | Implement `kern.emulation.module.<name>.version` sysctl | NOT STARTED | | | | | S0.5 | `sys/emulation/emu_sysctl.c` | Per-module version reporting. |
+| S0.7 | Implement `kern.emulation.module.<name>.refcount` sysctl | NOT STARTED | | | | | S0.5 | `sys/emulation/emu_sysctl.c` | Per-module instance refcount for monitoring. |
+| S0.8 | Implement module unloading safety tests | NOT STARTED | | | | | S0.1–S0.7 | `tests/sys/emulation/module_test.c` | Test MOD_UNLOAD with active instances (expect EBUSY). Test MOD_UNLOAD with no instances (expect success). Test MOD_LOAD with conflicting modules. Test `kldload emu` loads all sub-modules. Test `kldload emu_amd64` loads emu_core automatically. |
 
 ### Phase S1: Core Security Infrastructure
 
@@ -1719,6 +1859,12 @@ struct emu_crash_dump {
 | TC.47 | Memory management tests written and passing | Testing | NOT STARTED | | TC.35–TC.40 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, system-wide memory awareness |
 | TC.48 | Fuzz testing of instruction decoder | Testing | NOT STARTED | | TC.16 | `tests/sys/emulation/fuzz_test.c` | Random instruction sequences |
 | TC.49 | Security documentation written | Documentation | NOT STARTED | | TC.41–TC.48 | `share/doc/emulation/security.md` | Threat model, guidelines |
+| TC.50 | `emu_core.ko` modevent handler with instance refcount | Kernel Module | NOT STARTED | | S0.1 | `sys/emulation/emu_main.c` | MOD_UNLOAD refuses if instances active |
+| TC.51 | Per-arch module modevent handlers | Kernel Module | NOT STARTED | | S0.2 | `sys/emulation/*/emu_cpu_*.c` | MOD_UNLOAD refuses if arch instances active |
+| TC.52 | `MODULE_DEPEND` declarations for all emulation modules | Kernel Module | NOT STARTED | | S0.3 | `sys/modules/emu*/Makefile` | Master module depends on all sub-modules |
+| TC.53 | `emu.ko` master module implemented | Kernel Module | NOT STARTED | | S0.4 | `sys/modules/emu/Makefile` | `kldload emu` loads all emulation modules |
+| TC.54 | Module visibility sysctls implemented | Kernel Module | NOT STARTED | | S0.5–S0.7 | `sys/emulation/emu_sysctl.c` | `modules_loaded`, `module.<name>.version`, `module.<name>.refcount` |
+| TC.55 | Module unloading safety tests written and passing | Testing | NOT STARTED | | S0.8 | `tests/sys/emulation/module_test.c` | Active instance refusal, dependency chain, kldload emu |
 
 ---
 
@@ -1734,8 +1880,10 @@ The emulation framework's security architecture is built on four layers of defen
 
 4. **Filesystem and network controls**: Controlled sharing with path validation, read-only defaults, blocked dangerous paths, and host-only networking prevent the emulated environment from accessing sensitive host resources.
 
+The emulation framework is structured as a hierarchy of loadable kernel modules (`emu.ko` master, `emu_core.ko` core, `emu_<arch>.ko` per architecture), providing both a "one module to load them all" convenience (`kldload emu`) and per-architecture granularity (`kldload emu_amd64`). Module dependency tracking via `MODULE_DEPEND` ensures correct loading order and prevents unloading while instances are active.
+
 The key insight is that **the custom emulator path is actually more secure than bhyve for untrusted workloads** because:
-- It requires no kernel module
+- It requires only the emulation kernel modules (`emu_core.ko` + `emu_<arch>.ko`), not the full VMM stack
 - It runs entirely in userland with no special privileges
 - It has a much smaller codebase than bhyve
 - It can be Capsicum-sandboxed

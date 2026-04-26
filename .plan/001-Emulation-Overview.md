@@ -108,15 +108,59 @@ FreeBSD currently supports (or has historically supported) the following archite
 
 1. **Host safety**: Kernel testing must never run on the development or CI host directly.
 2. **Mode transparency**: The user specifies the target architecture; the framework selects the best available mode.
-3. **Per-architecture kernel options**: `KERNEL_EMULATION_{ARCH}` controls compilation of emulation support for each target architecture.
-4. **Off by default**: All emulation options default to disabled.
-5. **No external dependencies**: The emulator is built from scratch as part of the FreeBSD source tree.
-6. **Multi-instance support**: Multiple emulated instances of different architectures can run simultaneously, each with its own name, PID, and state.
-7. **Structured output**: All emulation output must be collected in formats parseable by both humans and AI agents (JSON, TAP, JUnit XML).
-8. **Stack examination**: The framework must provide tools to capture and analyze kernel stacks from emulated environments.
-9. **Module lifecycle testing**: Ability to load, unload, and verify kernel module behavior without crashing the host.
+3. **Loadable kernel modules**: The emulation framework is implemented as loadable kernel modules (`emu.ko`, `emu_core.ko`, `emu_amd64.ko`, etc.), not compiled into the kernel via options. This allows runtime selection of which architectures to support.
+4. **One module to load them all**: `kldload emu` loads the master module which automatically loads all sub-modules via `MODULE_DEPEND`.
+5. **Per-architecture granularity**: Individual architecture modules (`emu_amd64.ko`, `emu_aarch64.ko`, etc.) can be loaded independently for minimal footprint.
+6. **Off by default**: No emulation modules are loaded at boot. Explicit `kldload` required.
+7. **No external dependencies**: The emulator is built from scratch as part of the FreeBSD source tree.
+8. **Multi-instance support**: Multiple emulated instances of different architectures can run simultaneously, each with its own name, PID, and state.
+9. **Structured output**: All emulation output must be collected in formats parseable by both humans and AI agents (JSON, TAP, JUnit XML).
+10. **Stack examination**: The framework must provide tools to capture and analyze kernel stacks from emulated environments.
+11. **Module lifecycle testing**: Ability to load, unload, and verify kernel module behavior without crashing the host.
 
-### 4.3 Reference Architecture: bhyve/VMM
+### 4.3 Kernel Module Architecture
+
+The emulation framework is structured as a hierarchy of loadable kernel modules:
+
+```
+sys/modules/emu/Makefile          → emu.ko   (master module, loads all sub-modules)
+sys/modules/emu_core/Makefile     → emu_core.ko (core framework)
+sys/modules/emu_amd64/Makefile    → emu_amd64.ko (amd64 CPU emulation)
+sys/modules/emu_aarch64/Makefile  → emu_aarch64.ko (arm64 CPU emulation)
+sys/modules/emu_arm/Makefile      → emu_arm.ko (arm 32-bit CPU emulation)
+sys/modules/emu_i386/Makefile     → emu_i386.ko (i386 CPU emulation)
+sys/modules/emu_powerpc/Makefile  → emu_powerpc.ko (powerpc CPU emulation)
+sys/modules/emu_riscv/Makefile    → emu_riscv.ko (riscv CPU emulation)
+```
+
+**Module dependency chain:**
+
+```
+emu.ko (master)
+  ├── MODULE_DEPEND(emu_core)     → emu_core.ko
+  ├── MODULE_DEPEND(emu_amd64)    → emu_amd64.ko
+  ├── MODULE_DEPEND(emu_aarch64)  → emu_aarch64.ko
+  ├── MODULE_DEPEND(emu_arm)      → emu_arm.ko
+  ├── MODULE_DEPEND(emu_i386)     → emu_i386.ko
+  ├── MODULE_DEPEND(emu_powerpc)  → emu_powerpc.ko
+  └── MODULE_DEPEND(emu_riscv)    → emu_riscv.ko
+
+Each arch module:
+  └── MODULE_DEPEND(emu_core)     → emu_core.ko (loaded automatically)
+```
+
+**Loading behavior:**
+- `kldload emu` → loads master module, which triggers automatic loading of `emu_core.ko` and all arch modules
+- `kldload emu_amd64` → loads amd64 module, which triggers automatic loading of `emu_core.ko`
+- `kldload emu_core` → loads only the core framework (no CPU emulation, useful for management only)
+- `kldunload emu` → unloads master module and all sub-modules (if no other dependents)
+
+**Source file layout:**
+- Architecture-independent source: `sys/emulation/emu_*.c` (compiled into `emu_core.ko`)
+- Architecture-specific source: `sys/emulation/<arch>/emu_*.c` (compiled into respective `emu_<arch>.ko`)
+- Module Makefiles: `sys/modules/emu*/Makefile`
+
+### 4.4 Reference Architecture: bhyve/VMM
 
 The existing bhyve/VMM codebase provides key architectural patterns:
 
@@ -125,9 +169,9 @@ The existing bhyve/VMM codebase provides key architectural patterns:
 - **`kernemu_dev`**: Kernel-emulated device pass-through for LAPIC/IOAPIC/HPET MMIO regions
 - **`vmmapi`**: Library interface (`/usr/src/lib/libvmmapi`) for userland-VMM communication
 
-Our custom emulator follows a similar split: a kernel component for CPU emulation and a userland component for device emulation and orchestration.
+Our custom emulator follows a similar split: kernel modules for CPU emulation and a userland component for device emulation and orchestration.
 
-### 4.4 Multi-Instance Architecture
+### 4.5 Multi-Instance Architecture
 
 Each emulated instance is identified by a unique name and tracked independently:
 
@@ -154,25 +198,24 @@ Each instance has:
 
 ## 5. Implementation Phases
 
-### Phase 1: Kernel Options & Build System Integration
+### Phase 1: Kernel Module Build System Integration
 
-**Objective:** Add per-architecture kernel options and integrate the emulation subsystem into the build.
+**Objective:** Create the kernel module Makefiles and integrate the emulation modules into the build system.
 
 | # | Task | Status | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|-------|-------|-----|--------------|-------|-------|
-| 1.1 | Add `KERNEL_EMULATION_AMD64` to `sys/conf/options.amd64` | NOT STARTED | | | | | `sys/conf/options.amd64` | Output header: `opt_emulation.h`. Controls inclusion of amd64 CPU emulation code. |
-| 1.2 | Add `KERNEL_EMULATION_ARM64` to `sys/conf/options.arm64` | NOT STARTED | | | | | `sys/conf/options.arm64` | Output header: `opt_emulation.h`. Controls inclusion of arm64 CPU emulation code. |
-| 1.3 | Add `KERNEL_EMULATION_ARM` to `sys/conf/options.arm` | NOT STARTED | | | | | `sys/conf/options.arm` | Output header: `opt_emulation.h`. Controls inclusion of arm (32-bit) CPU emulation code. |
-| 1.4 | Add `KERNEL_EMULATION_I386` to `sys/conf/options.i386` | NOT STARTED | | | | | `sys/conf/options.i386` | Output header: `opt_emulation.h`. Controls inclusion of i386 CPU emulation code. |
-| 1.5 | Add `KERNEL_EMULATION_POWERPC` to `sys/conf/options.powerpc` | NOT STARTED | | | | | `sys/conf/options.powerpc` | Output header: `opt_emulation.h`. Controls inclusion of powerpc CPU emulation code. |
-| 1.6 | Add `KERNEL_EMULATION_RISCV` to `sys/conf/options.riscv` | NOT STARTED | | | | | `sys/conf/options.riscv` | Output header: `opt_emulation.h`. Controls inclusion of riscv CPU emulation code. |
-| 1.7 | Add `__DEFAULT_NO_OPTIONS` entries in `sys/conf/kern.opts.mk` | NOT STARTED | | | | 1.1–1.6 | `sys/conf/kern.opts.mk` | All emulation options default to NO. Add `KERNEL_EMULATION_AMD64`, `KERNEL_EMULATION_ARM64`, `KERNEL_EMULATION_ARM`, `KERNEL_EMULATION_I386`, `KERNEL_EMULATION_POWERPC`, `KERNEL_EMULATION_RISCV`. |
-| 1.8 | Add emulation framework files to `sys/conf/files` | NOT STARTED | | | | 1.7 | `sys/conf/files` | Architecture-independent emulation code: `sys/emulation/emu_main.c`, `emu_sysctl.c`, `emu_instance.c`, `emu_stack.c`, `emu_vmm.c`, `emu_cpu.c`, `emu_mem.c`, `emu_intr.c`, `emu_device.c`, `emu_console.c`, `emu_crash.c`, `emu_module.c`. |
-| 1.9 | Add architecture-specific files to per-arch `files.*` | NOT STARTED | | | | 1.8 | `sys/conf/files.amd64`, `files.arm64`, `files.arm`, `files.i386`, `files.powerpc`, `files.riscv` | Per-arch emulation code. Each `files.ARCH` gets entries for its `emu_cpu_ARCH.c`, `emu_mmu_ARCH.c`, `emu_intr_ARCH.c`. |
-| 1.10 | Create `sys/amd64/conf/EMULATION` kernel config | NOT STARTED | | | | 1.1 | `sys/amd64/conf/EMULATION` | Includes GENERIC + `KERNEL_EMULATION_AMD64`. Used for building a kernel with amd64 emulation support. |
-| 1.11 | Create `sys/arm64/conf/EMULATION` kernel config | NOT STARTED | | | | 1.2 | `sys/arm64/conf/EMULATION` | Includes GENERIC + `KERNEL_EMULATION_ARM64`. Used for building a kernel with arm64 emulation support. |
-| 1.12 | Create `sys/riscv/conf/EMULATION` kernel config | NOT STARTED | | | | 1.6 | `sys/riscv/conf/EMULATION` | Includes GENERIC + `KERNEL_EMULATION_RISCV`. Used for building a kernel with riscv emulation support. |
-| 1.13 | Create remaining per-arch EMULATION configs | NOT STARTED | | | | 1.3–1.5 | `sys/arm/conf/EMULATION`, `sys/i386/conf/EMULATION`, `sys/powerpc/conf/EMULATION` | Each includes GENERIC + its respective `KERNEL_EMULATION_*` option. |
+| 1.1 | Create `sys/modules/emu_core/Makefile` | NOT STARTED | | | | | `sys/modules/emu_core/Makefile` | Builds `emu_core.ko`. Source: `sys/emulation/emu_main.c`, `emu_sysctl.c`, `emu_instance.c`, `emu_stack.c`, `emu_vmm.c`, `emu_cpu.c`, `emu_mem.c`, `emu_intr.c`, `emu_device.c`, `emu_console.c`, `emu_crash.c`, `emu_module.c`, `emu_memmgmt.c`. Declares `MODULE_VERSION(emu_core, 1)`. |
+| 1.2 | Create `sys/modules/emu_amd64/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_amd64/Makefile` | Builds `emu_amd64.ko`. Source: `sys/emulation/amd64/emu_cpu_amd64.c`, `emu_mmu_amd64.c`, `emu_intr_amd64.c`. Declares `MODULE_DEPEND(emu_amd64, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_amd64, 1)`. |
+| 1.3 | Create `sys/modules/emu_aarch64/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_aarch64/Makefile` | Builds `emu_aarch64.ko`. Source: `sys/emulation/arm64/emu_cpu_arm64.c`, `emu_mmu_arm64.c`, `emu_intr_arm64.c`. Declares `MODULE_DEPEND(emu_aarch64, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_aarch64, 1)`. |
+| 1.4 | Create `sys/modules/emu_arm/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_arm/Makefile` | Builds `emu_arm.ko`. Source: `sys/emulation/arm/emu_cpu_arm.c`. Declares `MODULE_DEPEND(emu_arm, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_arm, 1)`. |
+| 1.5 | Create `sys/modules/emu_i386/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_i386/Makefile` | Builds `emu_i386.ko`. Source: `sys/emulation/i386/emu_cpu_i386.c`. Declares `MODULE_DEPEND(emu_i386, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_i386, 1)`. |
+| 1.6 | Create `sys/modules/emu_powerpc/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_powerpc/Makefile` | Builds `emu_powerpc.ko`. Source: `sys/emulation/powerpc/emu_cpu_ppc.c`. Declares `MODULE_DEPEND(emu_powerpc, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_powerpc, 1)`. |
+| 1.7 | Create `sys/modules/emu_riscv/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_riscv/Makefile` | Builds `emu_riscv.ko`. Source: `sys/emulation/riscv/emu_cpu_riscv.c`, `emu_mmu_riscv.c`, `emu_intr_riscv.c`. Declares `MODULE_DEPEND(emu_riscv, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_riscv, 1)`. |
+| 1.8 | Create `sys/modules/emu/Makefile` (master module) | NOT STARTED | | | | 1.2–1.7 | `sys/modules/emu/Makefile` | Builds `emu.ko` — master module with no source files. Declares `MODULE_DEPEND(emu, emu_core, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_amd64, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_aarch64, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_arm, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_i386, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_powerpc, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_riscv, 1, 1, 1)`. `kldload emu` loads all emulation modules. |
+| 1.9 | Add emulation modules to `sys/modules/Makefile` | NOT STARTED | | | | 1.8 | `sys/modules/Makefile` | Add `emu`, `emu_core`, `emu_amd64`, `emu_aarch64`, `emu_arm`, `emu_i386`, `emu_powerpc`, `emu_riscv` to SUBDIR. Conditional on `MACHINE_CPUARCH` where appropriate (e.g., `emu_amd64` only on amd64 host). |
+| 1.10 | Add `MK_EMULATION` build option to `share/mk/bsd.opts.mk` | NOT STARTED | | | | 1.9 | `share/mk/bsd.opts.mk` | Add `__DEFAULT_NO_OPTIONS` entry for `MK_EMULATION`. Controls whether emulation modules are built as part of `make buildworld` / `make modules`. |
+| 1.11 | Add `EMULATION` to `share/mk/src.opts.mk` | NOT STARTED | | | | 1.10 | `share/mk/src.opts.mk` | Register `MK_EMULATION` as a src option so it appears in `make showconfig`. |
+| 1.12 | Create `sys/emulation/` directory structure | NOT STARTED | | | | 1.1 | `sys/emulation/`, `sys/emulation/amd64/`, `sys/emulation/arm64/`, `sys/emulation/arm/`, `sys/emulation/i386/`, `sys/emulation/powerpc/`, `sys/emulation/riscv/` | New directories for emulation subsystem source files. |
 
 ### Phase 2: Kernel-Side Emulation Framework (`sys/emulation/`)
 
@@ -195,6 +238,7 @@ Each instance has:
 | 2.13 | Implement `emu_console.c` — console capture | NOT STARTED | | | | 2.2 | `sys/emulation/emu_console.c` | Capture guest console output into per-instance ring buffer. `emu_console_write()`, `emu_console_read()`, `emu_console_clear()`. Configurable buffer size (default 64KB). |
 | 2.14 | Implement `emu_crash.c` — crash detection | NOT STARTED | | | | 2.2 | `sys/emulation/emu_crash.c` | Detect panics in emulated environments. `emu_crash_detect()`, `emu_crash_capture()`, `emu_crash_dump()`. Captures register state, stack trace, and panic message. |
 | 2.15 | Implement `emu_module.c` — module state tracking | NOT STARTED | | | | 2.2 | `sys/emulation/emu_module.c` | Track loaded modules in emulated environment. `emu_module_loaded()`, `emu_module_unloaded()`, `emu_module_list()`. Maintains a list of (module_name, load_address, size, status) per instance. |
+| 2.16 | Implement `emu_memmgmt.c` — memory management & tracking | NOT STARTED | | | | 2.3 | `sys/emulation/emu_memmgmt.c` | Memory policy sysctls (`memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent`), per-instance `memory_used` tracking, host memory capacity detection (total physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin), overcommit warning logic, per-instance balloon target interface |
 
 ### Phase 3: Architecture-Specific CPU Emulation
 
@@ -525,6 +569,8 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | `kern.emulation.memory_system_reserve_percent` | CTLTYPE_INT | Percentage of total physical memory reserved for OS and non-emulation processes (default: 20) |
 | `kern.emulation.sandbox_capsicum` | CTLTYPE_INT | Enable Capsicum sandboxing for emulator processes (default: 1) |
 | `kern.emulation.sandbox_strict` | CTLTYPE_INT | Strict mode: fail on Capsicum error (default: 0) |
+| `kern.emulation.modules_loaded` | CTLTYPE_STRING | Comma-separated list of loaded emulation modules (read-only) |
+| `kern.emulation.module.<name>.version` | CTLTYPE_INT | Version of loaded emulation module (read-only) |
 | `kern.emulation.instance.<name>.memory_used` | CTLTYPE_UINT64 | Current actual memory usage in bytes (read-only) |
 | `kern.emulation.instance.<name>.memory_policy` | CTLTYPE_STRING | Per-instance memory policy override (read-only) |
 | `kern.emulation.instance.<name>.balloon_target` | CTLTYPE_UINT64 | Balloon target size in bytes (writable) |
@@ -575,23 +621,22 @@ This section is the master checklist for implementing the kernel emulation frame
 | 0.3 | Verify existing kernel builds pass on clean branch | NOT STARTED | | | | 0.2 | | Baseline before any changes |
 | 0.4 | Document baseline kernel module test workflow | NOT STARTED | | | | 0.3 | | Current process, pain points, metrics |
 
-### Phase 1: Kernel Options & Build System Integration
+### Phase 1: Kernel Module Build System Integration
 
 | # | Task | Status | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|-------|-------|-----|--------------|-------|-------|
-| 1.1 | Add `KERNEL_EMULATION_AMD64` to `sys/conf/options.amd64` | NOT STARTED | | | | 0.1 | `sys/conf/options.amd64` | Output header: `opt_emulation.h` |
-| 1.2 | Add `KERNEL_EMULATION_ARM64` to `sys/conf/options.arm64` | NOT STARTED | | | | 0.1 | `sys/conf/options.arm64` | Output header: `opt_emulation.h` |
-| 1.3 | Add `KERNEL_EMULATION_ARM` to `sys/conf/options.arm` | NOT STARTED | | | | 0.1 | `sys/conf/options.arm` | Output header: `opt_emulation.h` |
-| 1.4 | Add `KERNEL_EMULATION_I386` to `sys/conf/options.i386` | NOT STARTED | | | | 0.1 | `sys/conf/options.i386` | Output header: `opt_emulation.h` |
-| 1.5 | Add `KERNEL_EMULATION_POWERPC` to `sys/conf/options.powerpc` | NOT STARTED | | | | 0.1 | `sys/conf/options.powerpc` | Output header: `opt_emulation.h` |
-| 1.6 | Add `KERNEL_EMULATION_RISCV` to `sys/conf/options.riscv` | NOT STARTED | | | | 0.1 | `sys/conf/options.riscv` | Output header: `opt_emulation.h` |
-| 1.7 | Add `__DEFAULT_NO_OPTIONS` entries in `sys/conf/kern.opts.mk` | NOT STARTED | | | | 1.1–1.6 | `sys/conf/kern.opts.mk` | All emulation options default to NO |
-| 1.8 | Add emulation framework files to `sys/conf/files` | NOT STARTED | | | | 1.7 | `sys/conf/files` | Architecture-independent emulation code |
-| 1.9 | Add architecture-specific files to per-arch `files.*` | NOT STARTED | | | | 1.8 | `sys/conf/files.amd64`, `files.arm64`, etc. | Per-arch emulation code |
-| 1.10 | Create `sys/amd64/conf/EMULATION` kernel config | NOT STARTED | | | | 1.1 | `sys/amd64/conf/EMULATION` | Includes GENERIC + KERNEL_EMULATION_AMD64 |
-| 1.11 | Create `sys/arm64/conf/EMULATION` kernel config | NOT STARTED | | | | 1.2 | `sys/arm64/conf/EMULATION` | Includes GENERIC + KERNEL_EMULATION_ARM64 |
-| 1.12 | Create `sys/riscv/conf/EMULATION` kernel config | NOT STARTED | | | | 1.6 | `sys/riscv/conf/EMULATION` | Includes GENERIC + KERNEL_EMULATION_RISCV |
-| 1.13 | Create remaining per-arch EMULATION configs | NOT STARTED | | | | 1.3–1.5 | `sys/arm/conf/EMULATION`, `sys/i386/conf/EMULATION`, `sys/powerpc/conf/EMULATION` | As needed |
+| 1.1 | Create `sys/modules/emu_core/Makefile` | NOT STARTED | | | | 0.1 | `sys/modules/emu_core/Makefile` | Builds `emu_core.ko`. Source: `sys/emulation/emu_main.c`, `emu_sysctl.c`, `emu_instance.c`, `emu_stack.c`, `emu_vmm.c`, `emu_cpu.c`, `emu_mem.c`, `emu_intr.c`, `emu_device.c`, `emu_console.c`, `emu_crash.c`, `emu_module.c`, `emu_memmgmt.c`. Declares `MODULE_VERSION(emu_core, 1)`. |
+| 1.2 | Create `sys/modules/emu_amd64/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_amd64/Makefile` | Builds `emu_amd64.ko`. Source: `sys/emulation/amd64/emu_cpu_amd64.c`, `emu_mmu_amd64.c`, `emu_intr_amd64.c`. Declares `MODULE_DEPEND(emu_amd64, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_amd64, 1)`. |
+| 1.3 | Create `sys/modules/emu_aarch64/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_aarch64/Makefile` | Builds `emu_aarch64.ko`. Source: `sys/emulation/arm64/emu_cpu_arm64.c`, `emu_mmu_arm64.c`, `emu_intr_arm64.c`. Declares `MODULE_DEPEND(emu_aarch64, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_aarch64, 1)`. |
+| 1.4 | Create `sys/modules/emu_arm/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_arm/Makefile` | Builds `emu_arm.ko`. Source: `sys/emulation/arm/emu_cpu_arm.c`. Declares `MODULE_DEPEND(emu_arm, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_arm, 1)`. |
+| 1.5 | Create `sys/modules/emu_i386/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_i386/Makefile` | Builds `emu_i386.ko`. Source: `sys/emulation/i386/emu_cpu_i386.c`. Declares `MODULE_DEPEND(emu_i386, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_i386, 1)`. |
+| 1.6 | Create `sys/modules/emu_powerpc/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_powerpc/Makefile` | Builds `emu_powerpc.ko`. Source: `sys/emulation/powerpc/emu_cpu_ppc.c`. Declares `MODULE_DEPEND(emu_powerpc, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_powerpc, 1)`. |
+| 1.7 | Create `sys/modules/emu_riscv/Makefile` | NOT STARTED | | | | 1.1 | `sys/modules/emu_riscv/Makefile` | Builds `emu_riscv.ko`. Source: `sys/emulation/riscv/emu_cpu_riscv.c`, `emu_mmu_riscv.c`, `emu_intr_riscv.c`. Declares `MODULE_DEPEND(emu_riscv, emu_core, 1, 1, 1)` and `MODULE_VERSION(emu_riscv, 1)`. |
+| 1.8 | Create `sys/modules/emu/Makefile` (master module) | NOT STARTED | | | | 1.2–1.7 | `sys/modules/emu/Makefile` | Builds `emu.ko` — master module with no source files. Declares `MODULE_DEPEND(emu, emu_core, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_amd64, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_aarch64, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_arm, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_i386, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_powerpc, 1, 1, 1)`, `MODULE_DEPEND(emu, emu_riscv, 1, 1, 1)`. `kldload emu` loads all emulation modules. |
+| 1.9 | Add emulation modules to `sys/modules/Makefile` | NOT STARTED | | | | 1.8 | `sys/modules/Makefile` | Add `emu`, `emu_core`, `emu_amd64`, `emu_aarch64`, `emu_arm`, `emu_i386`, `emu_powerpc`, `emu_riscv` to SUBDIR. Conditional on `MACHINE_CPUARCH` where appropriate (e.g., `emu_amd64` only on amd64 host). |
+| 1.10 | Add `MK_EMULATION` build option to `share/mk/bsd.opts.mk` | NOT STARTED | | | | 1.9 | `share/mk/bsd.opts.mk` | Add `__DEFAULT_NO_OPTIONS` entry for `MK_EMULATION`. Controls whether emulation modules are built as part of `make buildworld` / `make modules`. |
+| 1.11 | Add `EMULATION` to `share/mk/src.opts.mk` | NOT STARTED | | | | 1.10 | `share/mk/src.opts.mk` | Register `MK_EMULATION` as a src option so it appears in `make showconfig`. |
+| 1.12 | Create `sys/emulation/` directory structure | NOT STARTED | | | | 1.1 | `sys/emulation/`, `sys/emulation/amd64/`, `sys/emulation/arm64/`, `sys/emulation/arm/`, `sys/emulation/i386/`, `sys/emulation/powerpc/`, `sys/emulation/riscv/` | New directories for emulation subsystem source files. |
 
 ### Phase 2: Kernel-Side Emulation Framework (`sys/emulation/`)
 
@@ -710,7 +755,7 @@ This section is the master checklist for implementing the kernel emulation frame
 
 | # | Task | Status | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|-------|-------|-----|--------------|-------|-------|
-| 8.1 | Write unit tests for kernel option parsing | NOT STARTED | | | | 1.7 | `tests/sys/emulation/option_test.c` | Verify option enable/disable |
+| 8.1 | Write unit tests for kernel module loading | NOT STARTED | | | | 1.8 | `tests/sys/emulation/module_test.c` | Verify `kldload emu` loads all sub-modules, `kldload emu_amd64` loads emu_core automatically, MOD_UNLOAD with active instances returns EBUSY |
 | 8.2 | Write unit tests for capability detection | NOT STARTED | | | | 2.2 | `tests/sys/emulation/caps_test.c` | Mock VMM availability |
 | 8.3 | Write unit tests for instance registry | NOT STARTED | | | | 2.4 | `tests/sys/emulation/instance_test.c` | Test create/destroy/find/list |
 | 8.4 | Write unit tests for stack capture | NOT STARTED | | | | 2.5 | `tests/sys/emulation/stack_test.c` | Verify stack trace formatting |
@@ -761,26 +806,27 @@ This section is the master checklist for implementing the kernel emulation frame
 | # | Item | Category | Status | Assigned To | Dependencies | Files | Notes |
 |---|------|----------|--------|------------|--------------|-------|-------|
 | C.1 | `.plan/` directory created with all plan files | Planning | NOT STARTED | | | `.plan/` | Foundation for all tracking |
-| C.2 | Kernel options added to `sys/conf/options` and per-arch files | Build System | NOT STARTED | | C.1 | `sys/conf/options`, `sys/conf/options.amd64`, etc. | `KERNEL_EMULATION` option |
-| C.3 | Kernel options added to `sys/conf/kern.opts.mk` (default no) | Build System | NOT STARTED | | C.1 | `sys/conf/kern.opts.mk` | `KERNEL_EMULATION` make option |
-| C.4 | `sys/emulation/` directory created with core framework | Kernel | NOT STARTED | | C.2, C.3 | `sys/emulation/` | Core kernel module files |
-| C.5 | Build system integration in `sys/conf/files` and per-arch files | Build System | NOT STARTED | | C.4 | `sys/conf/files`, `sys/conf/files.amd64`, etc. | Source file registration |
-| C.6 | EMULATION kernel config files created for each architecture | Kernel | NOT STARTED | | C.5 | `sys/amd64/conf/EMULATION`, etc. | Per-arch kernel configs |
-| C.7 | Architecture-specific CPU emulation implemented | Emulator | NOT STARTED | | C.4 | Phase 3 files | amd64, arm64, riscv64, i386, arm, powerpc |
-| C.8 | bhyve/VMM integration implemented | bhyve | NOT STARTED | | C.4 | Phase 4 files | Native-speed execution path |
-| C.9 | Custom emulator engine implemented | Emulator | NOT STARTED | | C.7 | Phase 5 files | Cross-architecture execution path |
-| C.10 | `usr.sbin/emu/` directory created with CLI tool | Userland | NOT STARTED | | C.8, C.9 | Phase 6 files | `emu` command-line interface |
-| C.11 | Multi-instance management implemented | Userland | NOT STARTED | | C.10 | `usr.sbin/emu/emu_list.c`, `emu_status.c` | Different archs simultaneously |
-| C.12 | Stack examination and debugging implemented | Debugging | NOT STARTED | | C.10 | Phase 7 files | Stack capture, symbol resolution, GDB stub |
-| C.13 | Memory management sysctls implemented | Memory | NOT STARTED | | C.4 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent` |
-| C.14 | Demand-paged guest memory (`mmap MAP_NORESERVE`) implemented | Memory | NOT STARTED | | C.9 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
-| C.15 | virtio-balloon device implemented for bhyve path | Memory | NOT STARTED | | C.8 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
-| C.16 | Per-instance `memory_used` tracking implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring |
-| C.17 | Memory overcommit safeguards and warnings implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Host capacity check (total physical minus system-wide used (OS + other processes) minus already-consumed by other instances minus safety margin), threshold warning |
-| C.18 | Memory management tests written and passing | Testing | NOT STARTED | | C.13–C.17 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, system-wide memory awareness |
-| C.19 | Test suite written and passing | Testing | NOT STARTED | | C.18 | Phase 8 files | Unit, integration, and performance tests |
-| C.20 | Documentation and man pages written | Documentation | NOT STARTED | | C.19 | Phase 9 files | Man pages, developer docs, RELNOTES |
-| C.21 | Committed to GitHub | Release | NOT STARTED | | C.20 | | Push to repository |
+| C.2 | `sys/modules/emu_core/Makefile` created | Build System | NOT STARTED | | C.1 | `sys/modules/emu_core/Makefile` | Builds `emu_core.ko` with `MODULE_VERSION(emu_core, 1)` |
+| C.3 | Per-arch module Makefiles created (`emu_amd64`, `emu_aarch64`, etc.) | Build System | NOT STARTED | | C.2 | `sys/modules/emu_*/Makefile` | Each declares `MODULE_DEPEND` on `emu_core` |
+| C.4 | `sys/modules/emu/Makefile` (master module) created | Build System | NOT STARTED | | C.3 | `sys/modules/emu/Makefile` | `kldload emu` loads all sub-modules via `MODULE_DEPEND` |
+| C.5 | Emulation modules added to `sys/modules/Makefile` SUBDIR | Build System | NOT STARTED | | C.4 | `sys/modules/Makefile` | Conditional on `MACHINE_CPUARCH` |
+| C.6 | `MK_EMULATION` build option added to `share/mk/bsd.opts.mk` | Build System | NOT STARTED | | C.5 | `share/mk/bsd.opts.mk` | `__DEFAULT_NO_OPTIONS` entry |
+| C.7 | `sys/emulation/` directory created with core framework | Kernel | NOT STARTED | | C.2 | `sys/emulation/` | Core kernel module source files |
+| C.8 | Architecture-specific CPU emulation implemented | Emulator | NOT STARTED | | C.7 | Phase 3 files | amd64, arm64, riscv64, i386, arm, powerpc |
+| C.9 | bhyve/VMM integration implemented | bhyve | NOT STARTED | | C.7 | Phase 4 files | Native-speed execution path |
+| C.10 | Custom emulator engine implemented | Emulator | NOT STARTED | | C.8 | Phase 5 files | Cross-architecture execution path |
+| C.11 | `usr.sbin/emu/` directory created with CLI tool | Userland | NOT STARTED | | C.9, C.10 | Phase 6 files | `emu` command-line interface |
+| C.12 | Multi-instance management implemented | Userland | NOT STARTED | | C.11 | `usr.sbin/emu/emu_list.c`, `emu_status.c` | Different archs simultaneously |
+| C.13 | Stack examination and debugging implemented | Debugging | NOT STARTED | | C.11 | Phase 7 files | Stack capture, symbol resolution, GDB stub |
+| C.14 | Memory management sysctls implemented | Memory | NOT STARTED | | C.7 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent` |
+| C.15 | Demand-paged guest memory (`mmap MAP_NORESERVE`) implemented | Memory | NOT STARTED | | C.10 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
+| C.16 | virtio-balloon device implemented for bhyve path | Memory | NOT STARTED | | C.9 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
+| C.17 | Per-instance `memory_used` tracking implemented | Memory | NOT STARTED | | C.14 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring |
+| C.18 | Memory overcommit safeguards and warnings implemented | Memory | NOT STARTED | | C.14 | `sys/emulation/emu_memmgmt.c` | Host capacity check (total physical minus system-wide used (OS + other processes) minus already-consumed by other instances minus safety margin), threshold warning |
+| C.19 | Memory management tests written and passing | Testing | NOT STARTED | | C.14–C.18 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, system-wide memory awareness |
+| C.20 | Test suite written and passing | Testing | NOT STARTED | | C.19 | Phase 8 files | Unit, integration, and performance tests |
+| C.21 | Documentation and man pages written | Documentation | NOT STARTED | | C.20 | Phase 9 files | Man pages, developer docs, RELNOTES |
+| C.22 | Committed to GitHub | Release | NOT STARTED | | C.21 | | Push to repository |
 
 ---
 
@@ -790,8 +836,10 @@ The recommended approach provides:
 
 - **No external dependencies**: Everything is built from source in the FreeBSD tree
 - **Dual-mode operation**: bhyve for native speed, custom emulator for cross-architecture
-- **Per-architecture kernel options**: `KERNEL_EMULATION_{ARCH}` for fine-grained control
-- **Off by default**: Safe for production systems
+- **Loadable kernel modules**: `emu.ko` master module loads all sub-modules; individual arch modules (`emu_amd64.ko`, `emu_aarch64.ko`, etc.) can be loaded independently
+- **One module to load them all**: `kldload emu` loads the entire emulation framework via `MODULE_DEPEND` chain
+- **Per-architecture granularity**: Load only the architectures you need with `kldload emu_amd64`
+- **Off by default**: No modules loaded at boot; explicit `kldload` required
 - **Multi-instance support**: Run emulated environments of different architectures simultaneously
 - **Stack examination**: First-class support for debugging and AI-agent consumption
 - **Dynamic memory management**: Demand-paged memory allocation reduces host memory consumption to only actively used pages; balloon driver for bhyve path; configurable memory policy (prealloc/demand/balloon) with overcommit safeguards and warnings; system-wide memory awareness (OS + other processes) for host capacity detection
