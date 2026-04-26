@@ -3335,6 +3335,18 @@ prison_allow(struct ucred *cred, unsigned flag)
 }
 
 /*
+ * Check if a prison is allowed to use the emulation framework.
+ * This checks the PR_ALLOW_EMULATION flag.
+ * The prison should be locked, or only a single bit is examined.
+ */
+bool
+prison_emulation_allowed(struct ucred *cred)
+{
+
+	return ((cred->cr_prison->pr_allow & PR_ALLOW_EMULATION) != 0);
+}
+
+/*
  * Hold a prison reference, by incrementing pr_ref.  It is generally
  * an error to hold a prison that does not already have a reference.
  * A prison record will remain valid as long as it has at least one

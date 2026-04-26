@@ -273,6 +273,7 @@ struct prison_racct {
 #define	PR_ALLOW_ROUTING		0x00200000
 #define	PR_ALLOW_UNPRIV_PARENT_TAMPER	0x00400000
 #define	PR_ALLOW_SETAUDIT		0x00800000
+#define	PR_ALLOW_EMULATION		0x01000000	/* Allow emulation framework */
 
 /*
  * PR_ALLOW_PRISON0 are the allow flags that we apply by default to prison0,
@@ -280,7 +281,7 @@ struct prison_racct {
  * build time.  PR_ALLOW_ALL_STATIC should contain any bit above that we expect
  * to be used on the system, while PR_ALLOW_PRISON0 will be some subset of that.
  */
-#define	PR_ALLOW_ALL_STATIC		0x00ff87ff
+#define	PR_ALLOW_ALL_STATIC		0x01ff87ff
 #define	PR_ALLOW_PRISON0		\
     (PR_ALLOW_ALL_STATIC & ~(PR_ALLOW_UNPRIV_PARENT_TAMPER))
 
@@ -457,6 +458,7 @@ void getcredhostid(struct ucred *, unsigned long *);
 void getjailname(struct ucred *cred, char *name, size_t len);
 void prison0_init(void);
 bool prison_allow(struct ucred *, unsigned);
+bool prison_emulation_allowed(struct ucred *);
 int prison_check(struct ucred *cred1, struct ucred *cred2);
 bool prison_check_nfsd(struct ucred *cred);
 bool prison_owns_vnet(struct prison *pr);
