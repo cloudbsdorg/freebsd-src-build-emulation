@@ -307,7 +307,7 @@ Each instance has:
 | # | Task | Status | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|-------|-------|-----|--------------|-------|-------|
 | 6.1 | Create `usr.sbin/emu/` directory | NOT STARTED | | | | | | New directory for emu tool. Create subdirectories for arch-specific frontends if needed. |
-| 6.2 | Implement `emu.c` — main CLI entry point | NOT STARTED | | | | 6.1 | `usr.sbin/emu/emu.c` | Command dispatch, option parsing. Subcommands: `init`, `start`, `stop`, `status`, `load`, `unload`, `stack`, `test`, `console`, `destroy`, `list`, `snapshot`, `restore`. Global flags: `--arch`, `--cpu-level`, `--name`, `--memory`, `--cpus`, `--image`, `--kernel`, `--mode`, `--output-format` (json/tap/junit). |
+| 6.2 | Implement `emu.c` — main CLI entry point | NOT STARTED | | | | 6.1 | `usr.sbin/emu/emu.c` | Command dispatch, option parsing. Subcommands: `init`, `start`, `stop`, `status`, `load`, `unload`, `stack`, `test`, `console`, `destroy`, `list`, `snapshot`, `restore`. Global flags: `--arch`, `--cpu-level`, `--cpu-speed`, `--name`, `--memory`, `--cpus`, `--image`, `--kernel`, `--mode`, `--output-format` (json/tap/junit). |
 | 6.3 | Implement `emu.h` — main header | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu.h` | Shared definitions and APIs. `struct emu_instance_config`, `struct emu_instance_state`, `struct emu_stack_output`. Function declarations for all subcommands. Constants for modes, statuses, output formats. |
 | 6.4 | Implement `emu_init.c` — init command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_init.c` | `emu init --arch <arch> [--cpu-level <level>] [--name <name>]`. Download/cache VM images, check dependencies (vmm.ko, bhyve). Creates instance configuration directory under `/var/emu/<name>/`. Validates architecture support and CPU level. |
 | 6.5 | Implement `emu_start.c` — start command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_start.c` | `emu start --name <name>`. Starts emulated instance. Selects optimal mode (bhyve vs emulator) based on host capabilities and target architecture. Forks child process, tracks PID. Updates instance state to RUNNING. |
@@ -321,7 +321,7 @@ Each instance has:
 | 6.13 | Implement `emu_console.c` — console command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_console.c` | `emu console --name <name> [--tail] [--lines <n>]`. Display or tail serial console output from instance. Supports `--follow` for live tailing. Can dump full console buffer with `--dump`. |
 | 6.14 | Implement `emu_destroy.c` — destroy command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_destroy.c` | `emu destroy --name <name> [--force]`. Destroy emulated instance. Stops if running, removes instance directory, cleans up `/dev/vmm/<name>` if applicable. With `--force`, skips confirmation. |
 | 6.15 | Implement `emu_snapshot.c` — snapshot/restore | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_snapshot.c` | `emu snapshot --name <name> [--file <path>]`, `emu restore --name <name> --file <path>`. Save/restore emulator state. For bhyve mode, uses VMM snapshot ioctl. For emulator mode, uses `emu_snapshot_save/restore()`. |
-| 6.16 | Implement `emu_config.c` — configuration | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_config.c` | Config file parsing (`emu.conf`). Reads `/usr/local/etc/emu.conf` and `~/.config/emu/emu.conf`. Supports: default_arch, default_cpu_level, default_memory, default_cpus, image_cache_dir, instance_dir, output_format. Uses XDG Base Directory spec. |
+| 6.16 | Implement `emu_config.c` — configuration | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_config.c` | Config file parsing (`emu.conf`). Reads `/usr/local/etc/emu.conf` and `~/.config/emu/emu.conf`. Supports: default_arch, default_cpu_level, default_cpu_speed_mhz, default_memory, default_cpus, image_cache_dir, instance_dir, output_format. Uses XDG Base Directory spec. |
 | 6.17 | Implement `emu_output.c` — output formatting | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_output.c` | Structured output formatting. `emu_output_json()`, `emu_output_tap()`, `emu_output_junit()`, `emu_output_table()`. Used by all subcommands for consistent output. |
 | 6.18 | Implement `Makefile` for emu tool | NOT STARTED | | | | 6.2 | `usr.sbin/emu/Makefile` | Build system integration. Links with `libvmmapi` for bhyve mode. Conditional compilation for arch-specific frontends. `MAN= emu.8 emu.conf.5`. |
 | 6.19 | Add `emu` to `usr.sbin/Makefile` | NOT STARTED | | | | 6.18 | `usr.sbin/Makefile` | Add `emu` to SUBDIR. Conditional on `MK_EMULATION != no`. |
@@ -452,6 +452,7 @@ struct emu_config {
     char name[64];           /* Instance name (unique) */
     char arch[32];           /* Target architecture */
     char cpu_level[32];      /* CPU level/feature tier (e.g., "x86-64-v3", "armv8.2-a", "rv64imafd") */
+    int cpu_speed_mhz;       /* CPU speed in MHz (0=default, e.g., 100 for legacy compat) */
     int mode;                /* EMU_MODE_BHYVE or EMU_MODE_EMULATOR */
     int memory_mb;           /* Configured memory size in MB */
     int ncpus;               /* Number of CPUs */
@@ -504,6 +505,7 @@ struct emu_instance_config {
     char name[64];           /* Instance name */
     char arch[32];           /* Target architecture */
     char cpu_level[32];      /* CPU level/feature tier */
+    int cpu_speed_mhz;       /* CPU speed in MHz (0=default) */
     int mode;                /* EMU_MODE_BHYVE or EMU_MODE_EMULATOR */
     pid_t pid;               /* Process ID */
     int status;              /* Running, stopped, crashed */
@@ -533,6 +535,7 @@ struct emu_instance_status {
     char name[64];
     char arch[32];
     char cpu_level[32];      /* CPU level/feature tier */
+    int cpu_speed_mhz;       /* CPU speed in MHz */
     char mode[16];           /* "bhyve" or "emulator" */
     int pid;
     char status[16];         /* "running", "stopped", "crashed" */
@@ -562,6 +565,7 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | `kern.emulation.instance.<name>.status` | CTLTYPE_STRING | Instance status (read-only) |
 | `kern.emulation.instance.<name>.arch` | CTLTYPE_STRING | Instance architecture (read-only) |
 | `kern.emulation.instance.<name>.cpu_level` | CTLTYPE_STRING | Instance CPU level/feature tier (read-only) |
+| `kern.emulation.instance.<name>.cpu_speed_mhz` | CTLTYPE_INT | Instance CPU speed in MHz (read-only) |
 | `kern.emulation.instance.<name>.mode` | CTLTYPE_STRING | Instance mode (read-only) |
 | `kern.emulation.instance.<name>.pid` | CTLTYPE_INT | Instance PID (read-only) |
 | `kern.emulation.instance.<name>.stack` | CTLTYPE_STRING | Trigger/read stack trace (write to trigger, read to get) |
