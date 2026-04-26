@@ -138,6 +138,8 @@ int	emu_cmd_restore(int argc, char *argv[]);
 int	emu_cmd_blob(int argc, char *argv[]);
 
 /* Utility functions */
+extern int		g_verbose;
+extern int		g_quiet;
 const char	*emu_arch_to_string(enum emu_arch arch);
 enum emu_arch	emu_string_to_arch(const char *str);
 const char	*emu_mode_to_string(enum emu_mode mode);
@@ -145,8 +147,35 @@ enum emu_mode	emu_string_to_mode(const char *str);
 const char	*emu_state_to_string(enum emu_state state);
 void		emu_output_json_begin(void);
 void		emu_output_json_end(void);
+void		emu_output_json_object_begin(const char *key);
+void		emu_output_json_object_end(int more);
+void		emu_output_json_array_begin(const char *key);
+void		emu_output_json_array_end(int more);
+void		emu_output_json_string(const char *key, const char *value);
+void		emu_output_json_int(const char *key, int64_t value);
+void		emu_output_json_uint(const char *key, uint64_t value);
+void		emu_output_json_bool(const char *key, int value);
+void		emu_output_tap_plan(int ntests);
+void		emu_output_tap_ok(int testnum, const char *description, ...);
+void		emu_output_tap_not_ok(int testnum, const char *description, ...);
+void		emu_output_tap_skip(int testnum, const char *reason);
+void		emu_output_tap_diag(const char *message);
+void		emu_output_junit_begin(const char *suite_name, int tests, int failures,
+							int errors, double time);
+void		emu_output_junit_end(void);
+void		emu_output_junit_testcase(const char *name, const char *classname,
+							double time, const char *failure_message,
+							const char *failure_type);
+void		emu_output_table_header(const char **headers, int ncols);
+void		emu_output_table_row(const char **values, int ncols);
+void		emu_output_table_separator(void);
+void		emu_output_instance(const struct emu_instance_state *state);
+void		emu_output_instance_list_header(void);
+void		emu_set_output_format(enum emu_output_format format);
+enum emu_output_format	emu_get_output_format(void);
 void		emu_output_error(const char *fmt, ...);
 void		emu_output_info(const char *fmt, ...);
+void		emu_output_verbose(const char *fmt, ...);
 __END_DECLS
 
 #endif /* !_EMU_H_ */

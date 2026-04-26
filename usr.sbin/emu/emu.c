@@ -87,8 +87,8 @@ static struct emu_command commands[] = {
 };
 
 /* Global options */
-static int g_verbose = 0;
-static int g_quiet = 0;
+int g_verbose = 0;
+int g_quiet = 0;
 static enum emu_output_format g_output_format = EMU_OUTPUT_TEXT;
 
 static void
