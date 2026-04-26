@@ -1,0 +1,603 @@
+# Emulation Framework Security — Chapter 6: Implementation Phases & Checklists
+
+> **Part of:** Security chapter series (002a through 002f)
+> **See also:** `001-Emulation-Overview.md` for main plan phases, `000-Emulation-TOC.md` for master index
+
+---
+
+## 11. Security Recommendations Summary
+
+### 11.1 By Component
+
+| Component | Recommendation | Priority |
+|-----------|---------------|----------|
+| Access control | Root-only by default; sysctl-gated non-root access | P0 |
+| Access control | `emu` system group (GID_EMU) for delegation | P0 |
+| Access control | Per-instance ownership via ucred | P0 |
+| Access control | Granular permissions per operation (create/destroy/start/stop/etc.) | P0 |
+| Access control | Per-user instance and memory limits | P0 |
+| Access control | Jail integration with `pr_allow_emu_flag` | P1 |
+| Custom emulator | Run as unprivileged user, no root required | P0 |
+| Custom emulator | Bounds-check all guest memory accesses | P0 |
+| Custom emulator | Validate all ELF segments before loading | P0 |
+| Custom emulator | Instruction decoder must handle all inputs safely | P0 |
+| Custom emulator | No dynamic code generation (no JIT initially) | P0 |
+| Custom emulator | Capsicum sandboxing after initialization | P1 |
+| bhyve path | Drop privileges after VM creation | P0 |
+| bhyve path | No passthrough devices for emulation instances | P0 |
+| bhyve path | Close unnecessary file descriptors | P1 |
+| Filesystem | Validate all share paths with realpath() | P0 |
+| Filesystem | Block /dev, /proc, /sys, /etc shares | P0 |
+| Filesystem | Read-only shares by default | P0 |
+| Filesystem | ZFS snapshots for clean test state | P1 |
+| Network | Host-only mode by default | P0 |
+| Network | MAC filtering on virtual NICs | P1 |
+| Network | GDB stub on localhost only | P0 |
+| Devices | Validate all MMIO register writes | P0 |
+| Devices | No DMA to host memory | P0 |
+| Devices | Minimal device implementations | P0 |
+| Instance mgmt | Mutex-protected instance registry | P0 |
+| Instance mgmt | Resource limits (memory, CPU time) | P1 |
+| Instance mgmt | Clean up all resources on destroy | P0 |
+| Memory mgmt | Demand-paged guest memory (mmap MAP_NORESERVE) | P0 |
+| Memory mgmt | `memory_policy` sysctl (prealloc/demand/balloon) | P0 |
+| Memory mgmt | `memory_overcommit` sysctl with safeguards | P0 |
+| Memory mgmt | `memory_warn_percent` threshold warning | P0 |
+| Memory mgmt | Per-instance `memory_used` tracking | P0 |
+| Memory mgmt | virtio-balloon device for bhyve path | P1 |
+| Memory mgmt | Host memory capacity check (total minus system minus instances minus reserve) | P0 |
+| Audit | Audit logging for all security events | P1 |
+| MAC | MAC framework integration | P2 |
+| Securelevel | Securelevel-aware operation restrictions | P1 |
+| Memory scrubbing | Zero guest memory on instance destroy | P1 |
+| Core dumps | Disable core dumps for emulator processes | P1 |
+| ptrace | Disable ptrace for emulator processes | P1 |
+| TOCTOU | Atomic permission check + operation under lock | P0 |
+| Signal handling | Safe signal handlers (flag-only, no non-reentrant calls) | P1 |
+| OOM | OOM score adjustment to protect emulator | P1 |
+| Entropy | virtio-rng device for guest entropy | P1 |
+| Supply chain | Signed kernel modules, reproducible builds | P1 |
+| Firmware | GPG + SHA-256 verification before loading | P1 |
+
+---
+
+## 12. Implementation Phases — Security, Access Control & Filesystem
+
+> **Note for agents:** When picking up a task, fill in the **Assigned To** column with your agent name/ID. When completing a task, update the **Status** column to `COMPLETED` and add your name/ID to the **Assigned To** column if not already filled. This ensures traceability across sessions.
+
+### Phase S0: Kernel Module Security Infrastructure
+
+**Objective:** Implement the kernel module loading, unloading, and dependency security for the emulation framework.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S0.1 | Implement `emu_core.ko` modevent handler with instance refcount | NOT STARTED | | | | | 2.2 | `sys/emulation/emu_main.c` | `emu_core_modevent()`: MOD_LOAD validates no conflicts, initializes registry/sysctl/devfs. MOD_UNLOAD refuses if `emu_instance_count() > 0`. |
+| S0.2 | Implement per-arch module modevent handlers | NOT STARTED | | | | | 3.1–3.12 | `sys/emulation/*/emu_cpu_*.c` | Each arch module's modevent: MOD_LOAD registers handlers with emu_core, MOD_UNLOAD refuses if arch instances active. |
+| S0.3 | Implement `MODULE_DEPEND` declarations for all modules | NOT STARTED | | | | | S0.1, S0.2 | `sys/modules/emu*/Makefile` | `emu.ko` depends on all sub-modules. Each arch module depends on `emu_core.ko`. Version checks via `MODULE_VERSION`. |
+| S0.4 | Implement `emu.ko` master module (no code, only dependencies) | NOT STARTED | | | | | S0.3 | `sys/modules/emu/Makefile` | Master module with no source files. Only `MODULE_DEPEND` declarations. `kldload emu` loads all emulation modules. |
+| S0.5 | Implement `kern.emulation.modules_loaded` sysctl | NOT STARTED | | | | | S0.1 | `sys/emulation/emu_sysctl.c` | Read-only sysctl listing all loaded emulation modules. |
+| S0.6 | Implement `kern.emulation.module.<name>.version` sysctl | NOT STARTED | | | | | S0.5 | `sys/emulation/emu_sysctl.c` | Per-module version reporting. |
+| S0.7 | Implement `kern.emulation.module.<name>.refcount` sysctl | NOT STARTED | | | | | S0.5 | `sys/emulation/emu_sysctl.c` | Per-module instance refcount for monitoring. |
+| S0.8 | Implement module unloading safety tests | NOT STARTED | | | | | S0.1–S0.7 | `tests/sys/emulation/module_test.c` | Test MOD_UNLOAD with active instances (expect EBUSY). Test MOD_UNLOAD with no instances (expect success). Test MOD_LOAD with conflicting modules. Test `kldload emu` loads all sub-modules. Test `kldload emu_amd64` loads emu_core automatically. |
+
+### Phase S1: Core Security Infrastructure
+
+**Objective:** Implement the fundamental security mechanisms for both execution paths.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S1.1 | Implement bounds-checked memory access in custom emulator | NOT STARTED | | | | | 5.2 | `usr.sbin/emu/emu_engine.c` | All guest memory reads/writes check against `inst->mem_size` |
+| S1.2 | Implement ELF loader with validation | NOT STARTED | | | | 5.5 | `usr.sbin/emu/emu_boot.c` | Validate ELF header, program headers, segment bounds |
+| S1.3 | Implement safe instruction decoder framework | NOT STARTED | | | | 5.2 | `usr.sbin/emu/emu_engine.c` | Bounds-checked operand reads, instruction length limits |
+| S1.4 | Implement bhyve privilege dropping | NOT STARTED | | | | 4.2 | `usr.sbin/emu/emu_bhyve.c` | `setuid()`/`setgid()` after VM creation |
+| S1.5 | Implement instance resource limits | NOT STARTED | | | | 2.4 | `sys/emulation/emu_instance.c` | Memory caps, CPU time limits, max instances |
+| S1.6 | Implement crash detection and containment | NOT STARTED | | | | 2.14 | `sys/emulation/emu_crash.c` | Detect panics, capture state, clean termination |
+| S1.7 | Write security unit tests | NOT STARTED | | | | S1.1–S1.6 | `tests/sys/emulation/security_test.c` | Bounds checking, ELF validation, crash containment |
+
+### Phase S2: Access Control & Authorization
+
+**Objective:** Implement the access control model for multi-user emulation management.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S2.1 | Add `GID_EMU` (979) to `sys/sys/conf.h` | NOT STARTED | | | | | | `sys/sys/conf.h` | New group for emulation framework delegation |
+| S2.2 | Add `PRIV_EMU_CREATE/DESTROY/MODIFY/ADMIN/AUDIT/BLOB` to `sys/sys/priv.h` | NOT STARTED | | | | | | `sys/sys/priv.h` | Kernel privilege definitions for emulation operations |
+| S2.3 | Implement `kern.emulation.allow_nonroot` sysctl | NOT STARTED | | | | | 2.3 | `sys/emulation/emu_sysctl.c` | Master switch for non-root access (default 0) |
+| S2.4 | Implement per-instance ownership (ucred) | NOT STARTED | | | | | 2.4 | `sys/emulation/emu_instance.c` | Track creating user's credentials per instance |
+| S2.5 | Implement granular permission checks | NOT STARTED | | | | | S2.4 | `sys/emulation/emu_instance.c` | `emu_check_perm()` for all operations |
+| S2.6 | Implement per-user instance/memory limits | NOT STARTED | | | | | S2.5 | `sys/emulation/emu_instance.c` | Track per-user counts, enforce limits on create |
+| S2.7 | Implement `cr_cansee()` for instance visibility | NOT STARTED | | | | | S2.4 | `sys/emulation/emu_instance.c` | Cross-user instance lookup filtering |
+| S2.8 | Implement jail integration | NOT STARTED | | | | | S2.3 | `sys/emulation/emu_sysctl.c` | `pr_allow_emu_flag`, `emu_jail_priv_check()` |
+| S2.9 | Add `--emu-group` flag to `emu` CLI | NOT STARTED | | | | | 6.2 | `usr.sbin/emu/emu.c` | Allow specifying group for non-root operation |
+| S2.10 | Write access control unit tests | NOT STARTED | | | | | S2.1–S2.9 | `tests/sys/emulation/acl_test.c` | Permission checks, ownership, limits, jail checks |
+
+### Phase S3: Filesystem Sharing
+
+**Objective:** Implement controlled filesystem sharing between host and emulated instances.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S3.1 | Implement share path validation | NOT STARTED | | | | | 6.2 | `usr.sbin/emu/emu_start.c` | `realpath()`, blocked prefix check, subdirectory check |
+| S3.2 | Implement custom emulator file sharing | NOT STARTED | | | | | 5.2 | `usr.sbin/emu/emu_engine.c` | Intercept guest open/read/write, translate paths |
+| S3.3 | Implement virtio-9p for bhyve path | NOT STARTED | | | | | 4.2 | `usr.sbin/bhyve/pci_virtio_9p.c` | PCI transport, 9p protocol handler |
+| S3.4 | Add `--share` flag to `emu` CLI | NOT STARTED | | | | | S3.1 | `usr.sbin/emu/emu_start.c` | `--share host_path:guest_path:ro` |
+| S3.5 | Implement base image management | NOT STARTED | | | | | 6.2 | `usr.sbin/emu/emu_init.c` | Download, cache, validate base images |
+| S3.6 | Implement ZFS snapshot integration | NOT STARTED | | | | | S3.5 | `usr.sbin/emu/emu_zfs.c` | `emu_zfs_snapshot()`, `emu_zfs_rollback()` |
+| S3.7 | Write filesystem security tests | NOT STARTED | | | | | S3.1–S3.6 | `tests/usr.sbin/emu/fs_security_test.sh` | Path traversal, symlink escape, permission tests |
+
+### Phase S4: Device & Network Security
+
+**Objective:** Implement secure device emulation and network isolation.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S4.1 | Implement MMIO validation framework | NOT STARTED | | | | | 5.4 | `usr.sbin/emu/emu_engine.c` | Validate offset, size, alignment for all MMIO accesses |
+| S4.2 | Implement UART with console-only output | NOT STARTED | | | | | 5.6 | `usr.sbin/emu/emu_dev_uart.c` | No host file access, output to instance console buffer |
+| S4.3 | Implement virtio-blk with file-backed storage | NOT STARTED | | | | | 5.9 | `usr.sbin/emu/emu_dev_storage.c` | I/O to disk image file, not host block device |
+| S4.4 | Implement host-only networking | NOT STARTED | | | | | 5.2 | `usr.sbin/emu/emu_dev_net.c` | Internal virtual network, no external access |
+| S4.5 | Implement NAT networking mode | NOT STARTED | | | | | S4.4 | `usr.sbin/emu/emu_dev_net.c` | Outbound-only network access via host NAT |
+| S4.6 | Implement GDB stub on localhost only | NOT STARTED | | | | | 5.16 | `usr.sbin/emu/emu_gdb.c` | Bind to 127.0.0.1, no external connections |
+| S4.7 | Write device security tests | NOT STARTED | | | | | S4.1–S4.6 | `tests/usr.sbin/emu/device_security_test.sh` | MMIO bounds, device state corruption, network isolation |
+
+### Phase S5: Hardening & Audit
+
+**Objective:** Harden the emulation framework and perform security audit.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S5.1 | Implement Capsicum sandboxing for custom emulator | NOT STARTED | | | | | S1.1 | `usr.sbin/emu/emu_engine.c` | `emu_enter_sandbox()`: limit rights on disk/console/GDB/snapshot FDs via `cap_rights_limit()`, close non-essential FDs, call `cap_enter()`. See `002c` Section 6.5 for full implementation specification. |
+| S5.2 | Implement Capsicum sandboxing for bhyve process | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_bhyve.c` | `emu_bhyve_enter_sandbox()`: limit rights on `/dev/vmm/<name>` FD (CAP_READ, CAP_WRITE, CAP_IOCTL, CAP_MMAP), restrict ioctls via `cap_ioctls_limit()`, limit disk/console FDs, close non-essential FDs, call `cap_enter()`. See `002c` Section 6.5 for full implementation specification. |
+| S5.3 | Close unnecessary file descriptors in both paths | NOT STARTED | | | | | S5.1, S5.2 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `emu_is_essential_fd()` / `emu_bhyve_is_essential_fd()` helpers. Close all FDs except disk, console, GDB, snapshot, VMM, and stdio. |
+| S5.4 | Add instruction count limits per execution slice | NOT STARTED | | | | | S1.3 | `usr.sbin/emu/emu_engine.c` | Prevent infinite loops in guest code |
+| S5.5 | Add watchdog timer for crash detection | NOT STARTED | | | | | S1.6 | `usr.sbin/emu/emu_engine.c` | Configurable timeout, trigger crash capture |
+| S5.6 | Security audit of all MMIO handlers | NOT STARTED | | | | | S4.1 | All device files | Verify bounds checking, input validation |
+| S5.7 | Fuzz testing of instruction decoder | NOT STARTED | | | | | S1.3 | `tests/sys/emulation/fuzz_test.c` | Random instruction sequences, edge cases |
+| S5.8 | Write Capsicum sandboxing unit tests | NOT STARTED | | | | | S5.1, S5.2 | `tests/sys/emulation/capsicum_test.c` | `test_capsicum_enter()`, `test_capsicum_rights_limit()`, `test_emulator_runs_under_capsicum()`. See `002c` Section 6.5.7 for test specifications. |
+| S5.9 | Write Capsicum sandboxing integration tests | NOT STARTED | | | | | S5.8 | `tests/usr.sbin/emu/capsicum_integration_test.sh` | Start instance with sandboxing enabled, verify it runs correctly, verify it cannot open new files or access /proc. |
+| S5.10 | Write security documentation | NOT STARTED | | | | | S5.1–S5.9 | `share/doc/emulation/security.md` | Threat model, security guidelines, incident response |
+
+### Phase S6: Memory Management & Overcommit Safety
+
+**Objective:** Implement dynamic memory allocation, demand paging, balloon driver, and overcommit safeguards.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S6.1 | Implement `emu_memmgmt.c` — memory policy sysctls | NOT STARTED | | | | | 2.3 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval` |
+| S6.2 | Implement host memory capacity detection | NOT STARTED | | | | | S6.1 | `sys/emulation/emu_memmgmt.c` | Read `hw.physmem` or `vm.page_count` for total physical. Read `vm.stats.vm.v_active_count`, `vm.stats.vm.v_wire_count`, `vm.stats.vm.v_cache_count`, `vm.stats.vm.v_inactive_count` to calculate system-wide used memory (OS + all non-emulation processes). Subtract already-consumed memory from other emulation instances. Subtract configurable safety margin (`memory_system_reserve_percent`). Result is available capacity for new instances. |
+| S6.3 | Implement overcommit warning logic | NOT STARTED | | | | | S6.2 | `sys/emulation/emu_memmgmt.c` | Compare total configured memory across all instances against available host capacity (total physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin). Log warning when threshold (`memory_warn_percent`) is exceeded. Include breakdown: total physical, system-wide used, already consumed by instances, safety reserve, available, new instance request. |
+| S6.4 | Implement per-instance `memory_used` tracking | NOT STARTED | | | | | S6.1 | `sys/emulation/emu_memmgmt.c` | Periodic RSS sampling via `procstat` or kernel `vmspace` |
+| S6.5 | Implement demand-paged guest memory in custom emulator | NOT STARTED | | | | | 5.2 | `usr.sbin/emu/emu_engine.c` | `mmap(MAP_ANON | MAP_NORESERVE)` instead of `malloc()` |
+| S6.6 | Implement prealloc memory mode | NOT STARTED | | | | | S6.5 | `usr.sbin/emu/emu_engine.c` | Traditional `malloc()` for full allocation |
+| S6.7 | Implement virtio-balloon device for bhyve path | NOT STARTED | | | | | 4.2 | `usr.sbin/bhyve/pci_virtio_balloon.c` | PCI balloon device, inflate/deflate via guest |
+| S6.8 | Implement balloon target sysctl interface | NOT STARTED | | | | | S6.7 | `sys/emulation/emu_memmgmt.c` | `kern.emulation.instance.<name>.balloon_target` |
+| S6.9 | Implement balloon periodic adjustment timer | NOT STARTED | | | | | S6.8 | `usr.sbin/bhyve/pci_virtio_balloon.c` | `memory_balloon_interval` timer, min floor via `memory_balloon_min_pct` |
+| S6.10 | Write memory management tests | NOT STARTED | | | | | S6.1–S6.9 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, tracking, system-wide memory awareness |
+
+### Phase S7: Audit Logging
+
+**Objective:** Implement comprehensive audit logging for all security-relevant events.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S7.1 | Implement audit log event definitions | NOT STARTED | | | | | S2.5 | `sys/emulation/emu_audit.h` | Define all audit event types, data structures, severity levels |
+| S7.2 | Implement audit log writer (syslog + file) | NOT STARTED | | | | | S7.1 | `sys/emulation/emu_audit.c` | Write structured log entries to syslog and/or file. Support log rotation. |
+| S7.3 | Implement audit sysctl controls | NOT STARTED | | | | | S7.2 | `sys/emulation/emu_sysctl.c` | `audit.enabled`, `audit.destination`, `audit.file`, `audit.rotation_size`, `audit.rotation_count` |
+| S7.4 | Add audit calls to all security-relevant operations | NOT STARTED | | | | | S7.2 | `sys/emulation/emu_instance.c`, `emu_sysctl.c`, `emu_crash.c` | Log instance create/destroy/start/stop, permission denials, share mounts, crashes, Capsicum failures, overcommit warnings, snapshots, config changes |
+| S7.5 | Implement `EMU_PERM_AUDIT` permission check | NOT STARTED | | | | | S7.4, S2.5 | `sys/emulation/emu_instance.c` | Only root can view audit logs |
+| S7.6 | Write audit logging tests | NOT STARTED | | | | | S7.1–S7.5 | `tests/sys/emulation/audit_test.c` | Test all events are logged. Test log format. Test log rotation. Test permission check for audit log access. |
+
+### Phase S8: MAC Framework Integration
+
+**Objective:** Integrate with FreeBSD's TrustedBSD MAC framework.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S8.1 | Implement MAC label propagation from creator to instance | NOT STARTED | | | | | S2.4 | `sys/emulation/emu_instance.c` | `emu_instance_apply_mac_label()` — get label from creating process, store in instance, apply to instance files |
+| S8.2 | Implement MAC label enforcement on share/snapshot operations | NOT STARTED | | | | | S8.1 | `sys/emulation/emu_instance.c` | Check MAC labels before allowing share mount or snapshot access |
+| S8.3 | Implement `mac_veriexec` integration for emulator binaries | NOT STARTED | | | | | | `usr.sbin/emu/emu.c` | Verify emu binary fingerprint before execution |
+| S8.4 | Write MAC integration tests | NOT STARTED | | | | | S8.1–S8.3 | `tests/sys/emulation/mac_test.c` | Test label propagation, enforcement, veriexec verification |
+
+### Phase S9: Securelevel Integration
+
+**Objective:** Ensure the emulator respects `kern.securelevel` restrictions.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S9.1 | Implement `emu_securelevel_check()` function | NOT STARTED | | | | | S2.5 | `sys/emulation/emu_instance.c` | Check `kern.securelevel` and restrict operations accordingly |
+| S9.2 | Add securelevel checks to all restricted operations | NOT STARTED | | | | | S9.1 | `sys/emulation/emu_instance.c`, `emu_sysctl.c` | Module load/unload, device write, sysctl write, disk write, snapshot, network change |
+| S9.3 | Write securelevel integration tests | NOT STARTED | | | | | S9.1, S9.2 | `tests/sys/emulation/securelevel_test.c` | Test each securelevel's restrictions. Test that operations are denied at appropriate levels. |
+
+### Phase S10: Memory Scrubbing
+
+**Objective:** Prevent data leakage between instances via memory scrubbing.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S10.1 | Implement `emu_scrub_memory()` function | NOT STARTED | | | | | S1.1 | `sys/emulation/emu_memmgmt.c` | `explicit_bzero()` guest memory on instance destroy. Support zero/random/pattern methods. |
+| S10.2 | Implement memory scrubbing sysctls | NOT STARTED | | | | | S10.1 | `sys/emulation/emu_sysctl.c` | `memory_scrub` (default 1), `memory_scrub_method` (default "zero") |
+| S10.3 | Write memory scrubbing tests | NOT STARTED | | | | | S10.1, S10.2 | `tests/sys/emulation/scrub_test.c` | Test that destroyed instance memory is zeroed. Test that new instance cannot read old instance's data. Test all scrubbing methods. |
+
+### Phase S11: Core Dump Security
+
+**Objective:** Prevent guest secrets from leaking via core dumps.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S11.1 | Implement `emu_disable_coredump()` function | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `setrlimit(RLIMIT_CORE, 0)` + `procctl(PROC_COREDUMP_CTL_DISABLE)` |
+| S11.2 | Write core dump security tests | NOT STARTED | | | | | S11.1 | `tests/usr.sbin/emu/coredump_test.sh` | Test that emulator core dumps do not contain guest memory. Test that `PROC_DISABLE_COREDUMP` is set. |
+
+### Phase S12: ptrace Attack Surface
+
+**Objective:** Prevent debugger attacks on emulator processes.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S12.1 | Implement `emu_disable_ptrace()` function | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `procctl(PROC_TRACE_CTL_DISABLE)` + `PROC_TRACE_CTL_DISABLE_EXEC` |
+| S12.2 | Write ptrace prevention tests | NOT STARTED | | | | | S12.1 | `tests/usr.sbin/emu/ptrace_test.sh` | Test that `ptrace()` to emulator process is blocked. Test that `PROC_TRACE` is restricted. |
+
+### Phase S13: TOCTOU Race Condition Prevention
+
+**Objective:** Eliminate time-of-check-time-of-use vulnerabilities.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S13.1 | Audit all permission check + operation pairs for TOCTOU | NOT STARTED | | | | | S2.5 | `sys/emulation/emu_instance.c` | Review all call sites of `emu_check_perm()` followed by operations. Ensure mutex is held across both. |
+| S13.2 | Implement `emu_atomic_operation()` wrapper | NOT STARTED | | | | | S13.1 | `sys/emulation/emu_instance.c` | Lock instance mutex, check permission, perform operation, unlock. Single function for atomic check+op. |
+| S13.3 | Write TOCTOU race tests | NOT STARTED | | | | | S13.2 | `tests/sys/emulation/toctou_test.c` | Test concurrent permission check + instance destroy. Test concurrent permission check + ownership change. |
+
+### Phase S14: Signal Handling Security
+
+**Objective:** Ensure signals cannot be used to inject unexpected behavior.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S14.1 | Implement safe signal handlers for all signals | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | Flag-only handlers for SIGSEGV, SIGPIPE, SIGTERM, SIGINT, SIGHUP, SIGUSR1, SIGUSR2. No non-reentrant function calls in handlers. |
+| S14.2 | Implement `emu_check_signals()` in main loop | NOT STARTED | | | | | S14.1 | `usr.sbin/emu/emu_engine.c` | Check signal flag at top of each execution slice. Handle each signal appropriately. |
+| S14.3 | Write signal handling tests | NOT STARTED | | | | | S14.1, S14.2 | `tests/usr.sbin/emu/signal_test.sh` | Test SIGSEGV in emulator (expect graceful shutdown). Test SIGPIPE from closed console. Test SIGTERM during snapshot. |
+
+### Phase S15: OOM Killer Interaction
+
+**Objective:** Protect emulator processes from premature OOM killing.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S15.1 | Implement `emu_adjust_oom_score()` function | NOT STARTED | | | | | S1.4 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `procctl(PROC_OOMADJ_CTL, PROC_OOMADJ_MIN)` to make emulator least likely to be killed |
+| S15.2 | Write OOM interaction tests | NOT STARTED | | | | | S15.1 | `tests/usr.sbin/emu/oom_test.sh` | Test OOM score adjustment. Test behavior under memory pressure (verify balloon deflates, verify graceful degradation). |
+
+### Phase S16: Entropy/RNG
+
+**Objective:** Provide a source of randomness for emulated guests.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S16.1 | Implement virtio-rng device | NOT STARTED | | | | | 5.4 | `usr.sbin/emu/emu_dev_rng.c` | virtio-rng over MMIO transport. Read from `arc4random_buf()`. Provide to guest on demand. |
+| S16.2 | Write entropy/RNG tests | NOT STARTED | | | | | S16.1 | `tests/usr.sbin/emu/rng_test.sh` | Test that guest has access to entropy. Test that entropy source is not predictable. Test virtio-rng descriptor validation. |
+
+### Phase S17: Supply Chain Security
+
+**Objective:** Ensure the emulator binaries are trustworthy.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S17.1 | Configure kernel module signing for all `emu_*.ko` modules | NOT STARTED | | | | | S0.1–S0.4 | `sys/modules/emu*/Makefile` | Add `MODULE_VERIFICATION` signing directives to all emulation module Makefiles |
+| S17.2 | Implement reproducible build verification | NOT STARTED | | | | | | `Makefile`, `tools/build/` | Add build verification step that compares binary checksums against known-good values |
+| S17.3 | Write supply chain tests | NOT STARTED | | | | | S17.1, S17.2 | `tests/sys/emulation/supplychain_test.sh` | Test that modules are signed. Test that tampered modules are rejected. Test reproducible build. |
+
+### Phase S18: Firmware Security
+
+**Objective:** Ensure firmware blobs are verified before loading.
+
+| # | Task | Status | Assigned To | Owner | Start | End | Dependencies | Files | Notes |
+|---|------|--------|------------|-------|-------|-----|--------------|-------|-------|
+| S18.1 | Implement firmware SHA-256 verification | NOT STARTED | | | | | 5.5 | `usr.sbin/emu/emu_blob.c` | Compute SHA-256 of firmware blob, compare against expected value from manifest |
+| S18.2 | Implement firmware GPG signature verification | NOT STARTED | | | | | S18.1 | `usr.sbin/emu/emu_blob.c` | Verify GPG signature of firmware blob against known public key |
+| S18.3 | Implement firmware version checking | NOT STARTED | | | | | S18.2 | `usr.sbin/emu/emu_blob.c` | Check firmware version against known-vulnerable version list |
+| S18.4 | Write firmware security tests | NOT STARTED | | | | | S18.1–S18.3 | `tests/usr.sbin/emu/firmware_test.sh` | Test loading tampered firmware blob (expect failure). Test loading valid firmware blob (expect success). Test GPG signature verification. Test version checking. |
+
+---
+
+## 13. Key Data Structures
+
+### 13.1 Access Control Structures
+
+```c
+/* Per-instance security context */
+struct emu_security_ctx {
+    struct ucred *owner;            /* Creating user's credentials */
+    uid_t owner_uid;                /* Cached owner UID */
+    gid_t owner_gid;                /* Cached owner GID */
+    int perm_mask;                  /* Custom permission mask (future) */
+};
+
+/* Global access control configuration */
+struct emu_access_config {
+    int allow_nonroot;              /* Master switch for non-root access */
+    gid_t required_group;           /* Required group GID (0 = any) */
+    int max_instances_per_user;     /* Per-user instance limit */
+    int max_instances_per_group;    /* Per-group instance limit */
+    int max_memory_per_user;        /* Per-user memory limit (MB) */
+    int destroy_others;             /* Allow emu group to destroy any instance */
+};
+
+/* Per-user resource tracking */
+struct emu_user_limits {
+    uid_t uid;                      /* User ID */
+    int instance_count;             /* Current instance count */
+    uint64_t total_memory_mb;       /* Current total memory usage */
+    LIST_ENTRY(emu_user_limits) entries;
+};
+
+/* Per-group resource tracking */
+struct emu_group_limits {
+    gid_t gid;                      /* Group ID */
+    int instance_count;             /* Current instance count */
+    LIST_ENTRY(emu_group_limits) entries;
+};
+```
+
+### 13.2 Filesystem Share Configuration
+
+```c
+/* Filesystem share entry */
+struct emu_fs_share {
+    char host_path[PATH_MAX];   /* Resolved host path */
+    char guest_prefix[64];      /* Guest mount point prefix */
+    bool readonly;              /* Read-only mount */
+    uid_t map_uid;              /* UID mapping (optional) */
+    gid_t map_gid;              /* GID mapping (optional) */
+    LIST_ENTRY(emu_fs_share) entries;
+};
+
+/* Per-instance share list */
+struct emu_instance {
+    /* ... existing fields ... */
+    struct emu_security_ctx sec;         /* Security context */
+    struct emu_fs_share_list shares;     /* List of filesystem shares */
+    int nshares;                         /* Number of shares */
+};
+```
+
+### 13.3 Security Policy
+
+```c
+/* Per-instance security policy */
+struct emu_security_policy {
+    bool allow_network;          /* Enable network device */
+    int network_mode;            /* EMU_NET_NONE, _HOSTONLY, _NAT, _BRIDGED */
+    bool allow_gdb;              /* Enable GDB stub */
+    uint16_t gdb_port;           /* GDB stub port (default: 0 = random) */
+    int max_instructions;        /* Max instructions per slice (0 = unlimited) */
+    int watchdog_seconds;        /* Watchdog timeout (0 = disabled) */
+    bool sandbox_capsicum;       /* Enable Capsicum sandboxing */
+    bool drop_privileges;        /* Drop root after setup */
+    char memory_policy[16];      /* "prealloc", "demand", "balloon" */
+    bool memory_overcommit;      /* Allow memory overcommit for this instance */
+    int balloon_min_pct;         /* Minimum balloon size as %% of configured */
+};
+```
+
+### 13.4 Crash Dump
+
+```c
+/* Crash dump header */
+struct emu_crash_dump {
+    char magic[8];               /* "EMUCRASH" */
+    uint32_t version;            /* Dump format version */
+    uint64_t timestamp;          /* Time of crash */
+    char arch[32];               /* Target architecture */
+    char panic_string[256];      /* Panic message (if available) */
+    int nregisters;              /* Number of saved registers */
+    int nframes;                 /* Number of stack frames */
+    int console_size;            /* Captured console output size */
+    /* Followed by: register state, stack frames, console output */
+};
+```
+
+---
+
+## 14. Sysctl Interface Additions
+
+### 14.1 Access Control Sysctls
+
+| Sysctl | Type | Default | Description |
+|--------|------|---------|-------------|
+| `kern.emulation.allow_nonroot` | CTLTYPE_INT | 0 | Allow non-root users to create/manage instances |
+| `kern.emulation.required_group` | CTLTYPE_INT | 979 (GID_EMU) | GID required for non-root access (0 = any group) |
+| `kern.emulation.max_instances_per_user` | CTLTYPE_INT | 4 | Maximum instances per non-root user |
+| `kern.emulation.max_instances_per_group` | CTLTYPE_INT | 16 | Maximum instances per group |
+| `kern.emulation.max_memory_per_user` | CTLTYPE_INT | 4096 | Max total MB per non-root user (0 = unlimited) |
+| `kern.emulation.destroy_others` | CTLTYPE_INT | 0 | Allow emu group members to destroy any instance |
+
+### 14.2 Security Sysctls
+
+| Sysctl | Type | Default | Description |
+|--------|------|---------|-------------|
+| `kern.emulation.max_instances` | CTLTYPE_INT | 16 | Maximum concurrent emulated instances |
+| `kern.emulation.max_memory_per_instance` | CTLTYPE_INT | 4096 | Max MB per instance (0 = unlimited) |
+| `kern.emulation.sandbox_capsicum` | CTLTYPE_INT | 1 | Enable Capsicum sandboxing (if available) |
+| `kern.emulation.sandbox_strict` | CTLTYPE_INT | 0 | Strict mode: fail on Capsicum error |
+| `kern.emulation.drop_privileges` | CTLTYPE_INT | 1 | Drop root privileges after setup |
+| `kern.emulation.watchdog_seconds` | CTLTYPE_INT | 30 | Default watchdog timeout |
+| `kern.emulation.blocked_share_paths` | CTLTYPE_STRING | "/dev,/proc,/sys,/etc" | Comma-separated blocked share prefixes |
+| `kern.emulation.memory_policy` | CTLTYPE_STRING | "demand" | Memory allocation policy: "prealloc", "demand", "balloon" |
+| `kern.emulation.memory_overcommit` | CTLTYPE_INT | 0 | Allow memory overcommit (0=off, 1=warn, 2=silent) |
+| `kern.emulation.memory_warn_percent` | CTLTYPE_INT | 80 | Warn when configured memory exceeds this % of available host RAM |
+| `kern.emulation.memory_balloon_min_pct` | CTLTYPE_INT | 10 | Minimum balloon size as % of configured RAM |
+| `kern.emulation.memory_balloon_interval` | CTLTYPE_INT | 5 | Balloon adjustment interval in seconds |
+| `kern.emulation.memory_system_reserve_percent` | CTLTYPE_INT | 20 | Percentage of total physical memory reserved for OS and non-emulation processes |
+| `kern.emulation.memory_scrub` | CTLTYPE_INT | 1 | Enable memory scrubbing on instance destroy |
+| `kern.emulation.memory_scrub_method` | CTLTYPE_STRING | "zero" | Scrubbing method: "zero", "random", "pattern" |
+| `kern.emulation.audit.enabled` | CTLTYPE_INT | 1 | Enable audit logging |
+| `kern.emulation.audit.destination` | CTLTYPE_STRING | "syslog" | Log destination: "syslog", "file", "both" |
+| `kern.emulation.audit.file` | CTLTYPE_STRING | "/var/log/emu-audit.log" | Log file path |
+| `kern.emulation.audit.rotation_size` | CTLTYPE_INT | 10485760 | Log rotation size in bytes (10MB) |
+| `kern.emulation.audit.rotation_count` | CTLTYPE_INT | 5 | Number of rotated log files to keep |
+
+---
+
+## 15. Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Non-root user abuses emulation to impact other users | High | Root-only default, per-user limits, ownership model, granular permissions |
+| User in emu group escalates to root via emulator bug | Critical | Privilege dropping, Capsicum sandboxing, no kernel component for custom emulator |
+| Instruction decoder bug allows arbitrary code execution in emulator process | Critical | Bounds checking, no JIT (no WX memory), Capsicum sandboxing |
+| ELF loader vulnerability allows buffer overflow | Critical | Validate all headers before loading, bounds-check all segments |
+| Symlink in shared directory allows host filesystem access | High | `realpath()` resolution, blocked path prefixes, read-only by default |
+| Guest consumes all host memory via emulator | High | Per-instance memory limits, `max_memory_per_user` sysctl |
+| bhyve VMM vulnerability allows guest escape | Critical | Use proven codebase, no passthrough devices, drop privileges |
+| Network from emulated instance used for attacks | Medium | Host-only mode by default, MAC filtering, rate limiting |
+| Snapshot file contains sensitive guest data | Medium | 0600 permissions, instance-specific directories, cleanup on destroy |
+| Race condition in instance registry | Medium | Mutex protection, atomic operations |
+| GDB stub allows arbitrary memory access | High | Localhost-only binding, authentication (future) |
+| Crash dump contains host memory data | Low | Crash dumps only contain guest state, not emulator state |
+| User creates excessive instances to exhaust resources | Medium | Per-user instance limits, per-group limits, `max_instances_per_user` sysctl |
+| Memory overcommit causes host OOM kill | Critical | `memory_overcommit` sysctl (default 0), `memory_warn_percent` threshold, demand paging with `MAP_NORESERVE`, host memory capacity check (total physical minus system-wide used (OS + other processes) minus already-consumed by other instances minus safety margin) |
+| Balloon driver failure causes guest memory pressure or crash | High | Minimum balloon floor via `memory_balloon_min_pct`, balloon target validation, guest cooperation required for inflation |
+| Demand paging exposes host memory pressure to guest | Medium | Guest may experience unexpected latency when host is under memory pressure; mitigated by balloon driver that proactively releases memory |
+| Memory tracking overhead impacts emulator performance | Low | `memory_used` sampled periodically (not on every access), configurable sampling interval |
+| Audit log tampering covers up security incidents | Medium | Append-only log files, log rotation, syslog as secondary destination |
+| MAC policy bypass allows unauthorized access | High | MAC label propagation from creator to instance, enforcement on share/snapshot |
+| Securelevel bypass allows restricted operations | High | `emu_securelevel_check()` on all restricted operations |
+| Memory scrubbing failure leaks data between instances | High | `explicit_bzero()` on destroy, configurable scrubbing method |
+| Core dump contains guest encryption keys | Medium | `RLIMIT_CORE=0`, `PROC_COREDUMP_CTL_DISABLE` |
+| ptrace reads guest memory from emulator process | Critical | `PROC_TRACE_CTL_DISABLE`, `PROC_TRACE_CTL_DISABLE_EXEC` |
+| TOCTOU race in permission check allows unauthorized operation | Medium | Atomic check+op under instance mutex lock |
+| Signal injection causes unexpected emulator behavior | Medium | Flag-only signal handlers, main loop checks flags safely |
+| OOM killer terminates emulator during critical operation | High | OOM score adjustment to minimum, balloon proactive release |
+| Guest has insufficient entropy for crypto operations | Medium | virtio-rng device providing host entropy |
+| Supply chain attack injects compromised emulator binaries | Critical | Signed kernel modules, reproducible builds, binary verification |
+| Malicious firmware blob compromises emulated environment | High | GPG + SHA-256 verification before loading |
+
+---
+
+## 16. Future Security Enhancements
+
+1. **Seccomp-like syscall filtering**: Restrict syscalls available to the emulator process
+2. **Address space layout randomization (ASLR)**: Randomize emulator memory layout
+3. **Instruction decoder fuzzing**: Automated fuzz testing of all instruction decoders
+4. **Kernel module signing**: Require signed modules before loading into emulated environment
+5. **Network traffic inspection**: Inspect guest network traffic for malicious patterns
+6. **Secure snapshot encryption**: Encrypt snapshot files at rest
+7. **Multi-tenant isolation**: Stronger isolation for CI/CD environments with untrusted workloads
+8. **Ownership transfer**: Allow instance owner to transfer ownership to another user
+9. **ACL-based permissions**: Fine-grained access control lists per instance (beyond group-based model)
+10. **Trusted Platform Module (TPM) attestation**: Remote attestation of emulated environment integrity
+11. **Intel CET / AMD Shadow Stack emulation**: Hardware-enforced control flow integrity for emulated code
+12. **Memory tagging (MTE) emulation**: ARM Memory Tagging Extension for memory safety
+
+---
+
+## 17. Task Completion Checklist
+
+> **Note for agents:** When picking up a task, fill in the **Assigned To** column with your agent name/ID. When completing a task, update the **Status** column to `COMPLETED` and add your name/ID to the **Assigned To** column if not already filled. This ensures traceability across sessions.
+
+| # | Item | Category | Status | Assigned To | Dependencies | Files | Notes |
+|---|------|----------|--------|------------|--------------|-------|-------|
+| TC.1 | `GID_EMU` (979) added to `sys/sys/conf.h` | Access Control | NOT STARTED | | | `sys/sys/conf.h` | New group for emulation delegation |
+| TC.2 | `PRIV_EMU_CREATE/DESTROY/MODIFY/ADMIN/AUDIT/BLOB` added to `sys/sys/priv.h` | Access Control | NOT STARTED | | | `sys/sys/priv.h` | Kernel privilege definitions |
+| TC.3 | `kern.emulation.allow_nonroot` sysctl implemented (default 0) | Access Control | NOT STARTED | | TC.1 | `sys/emulation/emu_sysctl.c` | Master switch for non-root access |
+| TC.4 | `kern.emulation.required_group` sysctl implemented | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_sysctl.c` | Required group for emulation |
+| TC.5 | `kern.emulation.max_instances_per_user` sysctl implemented | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_sysctl.c` | Per-user instance cap |
+| TC.6 | `kern.emulation.max_instances_per_group` sysctl implemented | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_sysctl.c` | Per-group instance cap |
+| TC.7 | `kern.emulation.max_memory_per_user` sysctl implemented | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_sysctl.c` | Per-user memory cap |
+| TC.8 | `kern.emulation.destroy_others` sysctl implemented | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_sysctl.c` | Allow group members to destroy any instance |
+| TC.9 | Per-instance ownership (ucred) implemented | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_instance.c` | Track creating user's credentials |
+| TC.10 | Granular permission checks on all operations | Access Control | NOT STARTED | | TC.9 | `sys/emulation/emu_instance.c` | `emu_check_perm()` for all ops |
+| TC.11 | Per-user instance/memory limits enforced | Access Control | NOT STARTED | | TC.10 | `sys/emulation/emu_instance.c` | Enforce on create |
+| TC.12 | Jail integration with `pr_allow_emu_flag` | Access Control | NOT STARTED | | TC.3 | `sys/emulation/emu_sysctl.c` | `emu_jail_priv_check()` |
+| TC.13 | `cr_cansee()` check on instance lookup | Access Control | NOT STARTED | | TC.9 | `sys/emulation/emu_instance.c` | Cross-user instance visibility |
+| TC.14 | Bounds-checked memory access in custom emulator | Custom Emulator | NOT STARTED | | S1.1 | `usr.sbin/emu/emu_engine.c` | All guest memory accesses checked |
+| TC.15 | ELF loader with full validation | Custom Emulator | NOT STARTED | | S1.2 | `usr.sbin/emu/emu_boot.c` | Validate headers and segments |
+| TC.16 | Safe instruction decoder with bounds checking | Custom Emulator | NOT STARTED | | S1.3 | `usr.sbin/emu/emu_engine.c` | Handle all inputs safely |
+| TC.17 | bhyve privilege dropping | bhyve | NOT STARTED | | S1.4 | `usr.sbin/emu/emu_bhyve.c` | `setuid()`/`setgid()` after VM setup |
+| TC.18 | Instance resource limits | Instance Mgmt | NOT STARTED | | S1.5 | `sys/emulation/emu_instance.c` | Memory caps, CPU time limits |
+| TC.19 | Crash detection and containment | Instance Mgmt | NOT STARTED | | S1.6 | `sys/emulation/emu_crash.c` | Detect panics, clean termination |
+| TC.20 | Share path validation with realpath() | Filesystem | NOT STARTED | | S3.1 | `usr.sbin/emu/emu_start.c` | Resolve symlinks, check prefixes |
+| TC.21 | Dangerous paths (/dev, /proc, /sys) blocked | Filesystem | NOT STARTED | | S3.1 | `usr.sbin/emu/emu_start.c` | Blocked prefix list |
+| TC.22 | Read-only shares by default | Filesystem | NOT STARTED | | S3.2 | `usr.sbin/emu/emu_engine.c` | `ro` flag default |
+| TC.23 | Custom emulator file sharing | Filesystem | NOT STARTED | | S3.2 | `usr.sbin/emu/emu_engine.c` | Intercept guest file operations |
+| TC.24 | virtio-9p for bhyve path | Filesystem | NOT STARTED | | S3.3 | `usr.sbin/bhyve/pci_virtio_9p.c` | PCI transport, 9p protocol |
+| TC.25 | Base image management | Filesystem | NOT STARTED | | S3.5 | `usr.sbin/emu/emu_init.c` | Download, cache, validate |
+| TC.26 | ZFS snapshot integration | Filesystem | NOT STARTED | | S3.6 | `usr.sbin/emu/emu_zfs.c` | `emu_zfs_snapshot()`, rollback |
+| TC.27 | MMIO validation framework | Devices | NOT STARTED | | S4.1 | `usr.sbin/emu/emu_engine.c` | Validate offset, size, alignment |
+| TC.28 | Host-only networking | Network | NOT STARTED | | S4.4 | `usr.sbin/emu/emu_dev_net.c` | Internal virtual network only |
+| TC.29 | GDB stub on localhost only | Network | NOT STARTED | | S4.6 | `usr.sbin/emu/emu_gdb.c` | 127.0.0.1 binding |
+| TC.30 | Capsicum sandboxing for custom emulator | Hardening | NOT STARTED | | S5.1 | `usr.sbin/emu/emu_engine.c` | `emu_enter_sandbox()`: `cap_rights_limit()` on disk/console/GDB/snapshot FDs, close non-essential FDs, `cap_enter()`. See `002c` Section 6.5. |
+| TC.31 | Capsicum sandboxing for bhyve process | Hardening | NOT STARTED | | S5.2 | `usr.sbin/emu/emu_bhyve.c` | `emu_bhyve_enter_sandbox()`: `cap_rights_limit()` on VMM/disk/console FDs, `cap_ioctls_limit()` on VMM FD, close non-essential FDs, `cap_enter()`. See `002c` Section 6.5. |
+| TC.32 | File descriptor cleanup (essential FD helpers) | Hardening | NOT STARTED | | S5.3 | `usr.sbin/emu/emu_engine.c`, `emu_bhyve.c` | `emu_is_essential_fd()` / `emu_bhyve_is_essential_fd()` helpers. Close all FDs except disk, console, GDB, snapshot, VMM, and stdio. |
+| TC.33 | Instruction count limits per execution slice | Hardening | NOT STARTED | | S5.4 | `usr.sbin/emu/emu_engine.c` | Prevent infinite loops in guest code |
+| TC.34 | Watchdog timer for crash detection | Hardening | NOT STARTED | | S5.5 | `usr.sbin/emu/emu_engine.c` | Configurable timeout, trigger crash capture |
+| TC.35 | Memory management sysctls implemented | Memory | NOT STARTED | | 2.16 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`, `memory_system_reserve_percent` |
+| TC.36 | Demand-paged guest memory (`mmap MAP_NORESERVE`) | Memory | NOT STARTED | | 5.18 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
+| TC.37 | virtio-balloon device for bhyve path | Memory | NOT STARTED | | 4.9 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
+| TC.38 | Per-instance `memory_used` tracking | Memory | NOT STARTED | | TC.35 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring via periodic RSS sampling |
+| TC.39 | Host memory capacity detection with system-wide awareness | Memory | NOT STARTED | | TC.35 | `sys/emulation/emu_memmgmt.c` | Read `hw.physmem` for total. Read `vm.stats.vm.*` for system-wide used (OS + other processes). Subtract emulation instances. Subtract `memory_system_reserve_percent` safety margin. |
+| TC.40 | Memory overcommit safeguards and warnings | Memory | NOT STARTED | | TC.39 | `sys/emulation/emu_memmgmt.c` | Compare total configured vs available capacity. Log warning at `memory_warn_percent` threshold. Include breakdown: total physical, system-wide used, instances, reserve, available. |
+| TC.41 | Access control unit tests written and passing | Testing | NOT STARTED | | TC.1–TC.13 | `tests/sys/emulation/acl_test.c` | Permission checks, ownership, limits |
+| TC.42 | Security unit tests written and passing | Testing | NOT STARTED | | TC.14–TC.19 | `tests/sys/emulation/security_test.c` | Bounds checking, ELF, crash |
+| TC.43 | Capsicum sandboxing unit tests written and passing | Testing | NOT STARTED | | TC.30, TC.31 | `tests/sys/emulation/capsicum_test.c` | `test_capsicum_enter()`, `test_capsicum_rights_limit()`, `test_emulator_runs_under_capsicum()` |
+| TC.44 | Capsicum sandboxing integration tests written and passing | Testing | NOT STARTED | | TC.43 | `tests/usr.sbin/emu/capsicum_integration_test.sh` | Start instance with sandboxing, verify correct operation under Capsicum |
+| TC.45 | Filesystem security tests written and passing | Testing | NOT STARTED | | TC.20–TC.26 | `tests/usr.sbin/emu/fs_security_test.sh` | Path traversal, symlink escape |
+| TC.46 | Device security tests written and passing | Testing | NOT STARTED | | TC.27–TC.29 | `tests/usr.sbin/emu/device_security_test.sh` | MMIO bounds, network isolation |
+| TC.47 | Memory management tests written and passing | Testing | NOT STARTED | | TC.35–TC.40 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit, system-wide memory awareness |
+| TC.48 | Fuzz testing of instruction decoder | Testing | NOT STARTED | | TC.16 | `tests/sys/emulation/fuzz_test.c` | Random instruction sequences |
+| TC.49 | Security documentation written | Documentation | NOT STARTED | | TC.41–TC.48 | `share/doc/emulation/security.md` | Threat model, guidelines |
+| TC.50 | `emu_core.ko` modevent handler with instance refcount | Kernel Module | NOT STARTED | | S0.1 | `sys/emulation/emu_main.c` | MOD_UNLOAD refuses if instances active |
+| TC.51 | Per-arch module modevent handlers | Kernel Module | NOT STARTED | | S0.2 | `sys/emulation/*/emu_cpu_*.c` | MOD_UNLOAD refuses if arch instances active |
+| TC.52 | `MODULE_DEPEND` declarations for all emulation modules | Kernel Module | NOT STARTED | | S0.3 | `sys/modules/emu*/Makefile` | Master module depends on all sub-modules |
+| TC.53 | `emu.ko` master module implemented | Kernel Module | NOT STARTED | | S0.4 | `sys/modules/emu/Makefile` | `kldload emu` loads all emulation modules |
+| TC.54 | Module visibility sysctls implemented | Kernel Module | NOT STARTED | | S0.5–S0.7 | `sys/emulation/emu_sysctl.c` | `modules_loaded`, `module.<name>.version`, `module.<name>.refcount` |
+| TC.55 | Module unloading safety tests written and passing | Testing | NOT STARTED | | S0.8 | `tests/sys/emulation/module_test.c` | Active instance refusal, dependency chain, kldload emu |
+| TC.56 | Permission matrix integration tests | Testing | NOT STARTED | | TC.10 | `tests/sys/emulation/acl_test.c` | Test all 55 combinations in the permission matrix. Test root, emu group owner, emu group non-owner, regular user owner, regular user non-owner for each operation. |
+| TC.57 | TOCTOU race condition tests | Testing | NOT STARTED | | S13.3 | `tests/sys/emulation/toctou_test.c` | Test concurrent permission check + instance destroy. Test concurrent permission check + ownership change. |
+| TC.58 | Capsicum strict mode tests | Testing | NOT STARTED | | TC.43 | `tests/sys/emulation/capsicum_test.c` | Test `sandbox_strict=1` with Capsicum unavailable (expect instance start failure). Test `sandbox_strict=0` with Capsicum unavailable (expect degraded mode). |
+| TC.59 | Capsicum FD right enforcement tests | Testing | NOT STARTED | | TC.43 | `tests/sys/emulation/capsicum_test.c` | Test that after `cap_rights_limit()`, restricted operations fail (e.g., write to read-only FD, seek on non-seekable FD). |
+| TC.60 | Memory scrubbing tests | Testing | NOT STARTED | | S10.3 | `tests/sys/emulation/scrub_test.c` | Test that destroyed instance memory is zeroed. Test that new instance cannot read old instance's data. |
+| TC.61 | Core dump prevention tests | Testing | NOT STARTED | | S11.2 | `tests/usr.sbin/emu/coredump_test.sh` | Test that emulator core dumps do not contain guest memory. Test `PROC_DISABLE_COREDUMP` is set. |
+| TC.62 | ptrace prevention tests | Testing | NOT STARTED | | S12.2 | `tests/usr.sbin/emu/ptrace_test.sh` | Test that `ptrace()` to emulator process is blocked. Test that `PROC_TRACE` is restricted. |
+| TC.63 | Signal handling tests | Testing | NOT STARTED | | S14.3 | `tests/usr.sbin/emu/signal_test.sh` | Test SIGSEGV in emulator (expect graceful shutdown). Test SIGPIPE from closed console. Test SIGTERM during snapshot. |
+| TC.64 | OOM killer interaction tests | Testing | NOT STARTED | | S15.2 | `tests/usr.sbin/emu/oom_test.sh` | Test OOM score adjustment. Test behavior under memory pressure. |
+| TC.65 | Firmware integrity tests | Testing | NOT STARTED | | S18.4 | `tests/usr.sbin/emu/firmware_test.sh` | Test loading tampered firmware blob (expect failure). Test loading valid firmware blob (expect success). |
+| TC.66 | Audit log tests | Testing | NOT STARTED | | S7.6 | `tests/sys/emulation/audit_test.c` | Test that all security events are logged. Test log format. Test log rotation. Test log destination. |
+| TC.67 | MAC framework integration tests | Testing | NOT STARTED | | S8.4 | `tests/sys/emulation/mac_test.c` | Test that MAC policies apply to emulator. Test that `mac_bsdextended` rules are enforced. |
+| TC.68 | Securelevel integration tests | Testing | NOT STARTED | | S9.3 | `tests/sys/emulation/securelevel_test.c` | Test that `securelevel=1` prevents module loading. Test that `securelevel=1` prevents instance modification. |
+| TC.69 | rctl integration tests | Testing | NOT STARTED | | S1.5 | `tests/sys/emulation/rctl_test.c` | Test that rctl limits are enforced on emulator processes. |
+| TC.70 | DTrace probe tests | Testing | NOT STARTED | | S1.7 | `tests/sys/emulation/dtrace_test.sh` | Test that DTrace probes fire correctly. Test that DTrace can be used for security auditing. |
+| TC.71 | Zombie process cleanup tests | Testing | NOT STARTED | | S1.4 | `tests/usr.sbin/emu/zombie_test.sh` | Test that crashed child processes are reaped. Test that zombie processes don't accumulate. |
+| TC.72 | Swap encryption tests | Testing | NOT STARTED | | S6.5 | `tests/usr.sbin/emu/swap_test.sh` | Test that guest memory is not leaked to unencrypted swap. Test `mlock()` option. |
+| TC.73 | NUMA allocation tests | Testing | NOT STARTED | | S6.5 | `tests/usr.sbin/emu/numa_test.sh` | Test NUMA-aware memory allocation. Test NUMA node binding. |
+| TC.74 | Huge page tests | Testing | NOT STARTED | | S6.5 | `tests/usr.sbin/emu/hugepage_test.sh` | Test huge page allocation. Test huge page performance. Test huge page fallback. |
+| TC.75 | Entropy/RNG tests | Testing | NOT STARTED | | S16.2 | `tests/usr.sbin/emu/rng_test.sh` | Test that guest has access to entropy. Test that entropy source is not predictable. |
+| TC.76 | KASLR tests | Testing | NOT STARTED | | S1.2 | `tests/sys/emulation/kaslr_test.c` | Test that guest kernel is loaded at random address. Test that KASLR is configurable. |
+| TC.77 | virtio security tests | Testing | NOT STARTED | | S4.3 | `tests/usr.sbin/emu/virtio_security_test.sh` | Test descriptor chain depth limits. Test indirect descriptor limits. Test event index validation. Test buffer overflow scenarios. |
+| TC.78 | 9p security tests | Testing | NOT STARTED | | S3.3 | `tests/usr.sbin/emu/9p_security_test.sh` | Test path traversal in 9p. Test fid reuse. Test authentication bypass. |
+| TC.79 | Environment variable leakage tests | Testing | NOT STARTED | | S5.3 | `tests/usr.sbin/emu/env_leakage_test.sh` | Test that guest config is not visible via `ps aux`. Test that guest config is not visible via `/proc`. |
+
+---
+
+## 18. Conclusion
+
+The emulation framework's security architecture is built on four layers of defense:
+
+1. **Access control layer**: Root-only by default, group-based delegation via `emu` group, per-instance ownership, granular per-operation permissions, per-user resource limits, and jail integration ensure that only authorized users can create and manage emulated instances.
+
+2. **OS-level isolation**: Process boundaries, user privileges, file permissions, Capsicum sandboxing, ptrace restrictions, core dump prevention, and signal handling ensure that even if the emulator is compromised, the attacker gains only the privileges of an unprivileged user.
+
+3. **Emulator-level isolation**: Bounds-checked memory access, validated ELF loading, safe instruction decoding, input-validated device emulation, timing side-channel mitigation, and VM introspection prevent most attacks from succeeding within the emulator itself.
+
+4. **Filesystem and network controls**: Controlled sharing with path validation, read-only defaults, blocked dangerous paths, host-only networking, and MAC filtering prevent the emulated environment from accessing sensitive host resources.
+
+The framework adds 12 additional security phases (S7-S18) beyond the core phases (S0-S6), covering audit logging, MAC framework integration, securelevel awareness, memory scrubbing, core dump security, ptrace prevention, TOCTOU elimination, signal handling safety, OOM protection, entropy provision, supply chain security, and firmware verification.
+
+The key insight is that **the custom emulator path is actually more secure than bhyve for untrusted workloads** because:
+- It requires only the emulation kernel modules (`emu_core.ko` + `emu_<arch>.ko`), not the full VMM stack
+- It runs entirely in userland with no special privileges
+- It has a much smaller codebase than bhyve
+- It can be Capsicum-sandboxed
+- It has no hardware passthrough capability
+- It has comprehensive process hardening (no ptrace, no core dumps, OOM protection)
+
+For trusted workloads where performance matters, the bhyve path provides hardware-enforced isolation with EPT/NPT and IOMMU protection, backed by a mature, well-audited codebase.
+
+The access control model follows the proven bhyve/VMM pattern (GID_VMM, PRIV_VMM_*, per-VM ucred, jail integration) while extending it with granular per-operation permissions that allow fine-grained delegation — a user may start and stop an instance without being able to create or destroy it.

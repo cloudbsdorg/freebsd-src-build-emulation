@@ -1,0 +1,912 @@
+# Emulation Framework Security — Chapter 3: Custom Emulator Deep-Dive
+
+> **Part of:** Security chapter series (002a through 002f)
+> **See also:** `002a` for isolation architecture, `002f` for implementation phases (S1, S5)
+
+---
+
+## 6. Custom Emulator Security
+
+### 6.1 Attack Surface Analysis
+
+The custom emulator has a smaller but more critical attack surface than bhyve:
+
+| Component | Attack Surface | Risk | Mitigation |
+|-----------|---------------|------|------------|
+| Instruction decoder | Parses arbitrary guest code | Critical — buffer overflow, infinite loop | Bounds checking, operand validation, instruction limit |
+| Memory emulation | Translates guest virtual addresses | High — out-of-bounds access | Bounds checking on all memory operations |
+| MMU emulation | Walks guest page tables | High — infinite loop, invalid entries | Page table depth limit, valid entry checks |
+| Device emulation | Handles MMIO reads/writes | Medium — device state corruption | Input validation on all MMIO operations |
+| ELF loader | Parses kernel/module ELF files | High — buffer overflow | ELF validation, section bounds checking |
+| GDB stub | Accepts remote debugger connections | Medium — arbitrary memory read/write | Authentication, localhost-only binding |
+
+### 6.2 Instruction Decoder Safety
+
+The instruction decoder is the most security-critical component:
+
+**Design principles:**
+- **No dynamic code generation**: The emulator uses interpretive emulation (no JIT initially), avoiding the need for WX memory
+- **Bounds-checked operands**: All operand reads verify they are within the instruction buffer
+- **Instruction length limit**: Maximum instruction length is enforced (e.g., 15 bytes for x86-64)
+- **Instruction count limit**: A configurable instruction limit per execution slice prevents infinite loops
+- **Validated opcodes**: Unknown or invalid opcodes raise an illegal instruction exception rather than crashing the emulator
+
+**Decoder safety pattern:**
+```c
+int
+emu_decode_instruction(struct emu_cpu *cpu, uint8_t *bytes, int max_len)
+{
+    int consumed = 0;
+
+    if (max_len > MAX_INSTRUCTION_LENGTH)
+        max_len = MAX_INSTRUCTION_LENGTH;
+
+    /* Check each byte before reading */
+    while (consumed < max_len) {
+        if (consumed >= max_len)
+            return (EMU_ERR_INVALID_INSTRUCTION);
+
+        uint8_t opcode = bytes[consumed++];
+        /* ... decode ... */
+    }
+
+    return (consumed);
+}
+```
+
+### 6.3 Memory Safety
+
+Guest memory access is always bounds-checked:
+
+```c
+int
+emu_mem_read(struct emu_instance *inst, uint64_t gaddr,
+             void *buf, size_t size)
+{
+    /* Validate guest address range */
+    if (gaddr + size > inst->mem_size || gaddr + size < gaddr) {
+        /* Address outside guest memory — raise MMIO or fault */
+        if (is_mmio_region(inst, gaddr)) {
+            return (emu_mmio_dispatch(inst, gaddr, buf, size, EMU_MMIO_READ));
+        }
+        return (EMU_ERR_FAULT);
+    }
+
+    /* Safe: bounds-checked copy from guest memory */
+    memcpy(buf, inst->guest_mem + gaddr, size);
+    return (0);
+}
+```
+
+**Key memory safety properties:**
+- Guest memory is a single contiguous allocation — no guest pointer can reference outside it
+- MMIO regions are checked before guest RAM — prevents guest from mapping MMIO over RAM
+- All memory operations check `gaddr + size` against `inst->mem_size`
+- No guest code can execute on the host CPU — all instructions are interpreted
+
+### 6.4 ELF Loader Safety
+
+Loading a kernel or module into the emulator involves parsing ELF files:
+
+```c
+int
+emu_elf_load(struct emu_instance *inst, const char *path)
+{
+    /* Validate ELF header */
+    if (ehdr->e_ident[EI_MAG0] != ELFMAG0 ||
+        ehdr->e_ident[EI_MAG1] != ELFMAG1 ||
+        ehdr->e_ident[EI_MAG2] != ELFMAG2 ||
+        ehdr->e_ident[EI_MAG3] != ELFMAG3) {
+        return (EMU_ERR_NOT_ELF);
+    }
+
+    /* Validate architecture matches instance target */
+    if (ehdr->e_machine != inst->arch_elf_machine) {
+        return (EMU_ERR_ARCH_MISMATCH);
+    }
+
+    /* Validate each program header before loading */
+    for (int i = 0; i < ehdr->e_phnum; i++) {
+        /* Check segment fits in guest memory */
+        if (phdr[i].p_vaddr + phdr[i].p_memsz > inst->mem_size) {
+            return (EMU_ERR_SEGMENT_OVERFLOW);
+        }
+        /* Check segment doesn't overlap with emulator private regions */
+        if (overlaps_emulator_region(inst, phdr[i].p_vaddr, phdr[i].p_memsz)) {
+            return (EMU_ERR_SEGMENT_CONFLICT);
+        }
+    }
+
+    /* Load validated segments */
+    /* ... */
+}
+```
+
+### 6.5 Capsicum Sandboxing
+
+FreeBSD's Capsicum capability framework provides fine-grained rights restriction on file descriptors and process capabilities. The emulation framework implements Capsicum sandboxing as a **first-class security feature**, not a future enhancement. Both the custom emulator and bhyve paths enter capability mode after initialization is complete.
+
+#### 6.5.1 Architecture Overview
+
+```
+Process Startup
+      │
+      ├── Parse config, open files, allocate memory
+      ├── Load kernel/module into guest memory
+      ├── Set up devices, console, network
+      ├── Open disk image, snapshot, log files
+      ├── Bind GDB socket (if enabled)
+      │
+      ▼
+  ┌─────────────────────────────────────────────┐
+  │         CAPSICUM ENTER POINT                 │
+  │                                              │
+  │  1. Limit rights on all open file descriptors│
+  │  2. Call cap_enter() to enter capability mode│
+  │  3. After cap_enter(): no new capabilities,  │
+  │     no new FDs, no /proc, no sysctl, no fork │
+  └─────────────────────────────────────────────┘
+      │
+      ▼
+  ┌─────────────────────────────────────────────┐
+  │         EMULATION RUN LOOP                   │
+  │  (fetch-decode-execute under Capsicum)       │
+  │                                              │
+  │  Allowed operations only:                    │
+  │  - Read/write/seek on disk image FD          │
+  │  - Read/write on console pipe FD             │
+  │  - Read/write/accept on GDB socket FD        │
+  │  - mmap/mprotect/munmap on existing mappings │
+  │  - clock_gettime (for timers)                │
+  └─────────────────────────────────────────────┘
+```
+
+#### 6.5.2 Custom Emulator Capsicum Implementation
+
+```c
+#include <sys/capsicum.h>
+
+/*
+ * Enter Capsicum capability mode for the custom emulator process.
+ * Called after all initialization is complete (config parsed,
+ * kernel loaded, devices set up, files opened).
+ *
+ * Returns 0 on success, -1 on failure (process continues without
+ * sandbox in degraded mode).
+ */
+int
+emu_enter_sandbox(struct emu_instance *inst)
+{
+    cap_rights_t rights;
+
+    /* ── Step 1: Limit rights on disk image FD ── */
+    /* Allow: read, write, seek. Deny: exec, ioctl, fcntl, etc. */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_SEEK);
+    if (cap_rights_limit(inst->disk_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(disk_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 2: Limit rights on console pipe FD ── */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE);
+    if (cap_rights_limit(inst->console_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(console_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 3: Limit rights on GDB socket FD (if enabled) ── */
+    if (inst->gdb_fd >= 0) {
+        cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_ACCEPT);
+        if (cap_rights_limit(inst->gdb_fd, &rights) < 0 && errno != ENOSYS) {
+            warn("cap_rights_limit(gdb_fd) failed");
+            return (-1);
+        }
+    }
+
+    /* ── Step 4: Limit rights on snapshot/log FDs (if open) ── */
+    if (inst->snapshot_fd >= 0) {
+        cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_SEEK);
+        if (cap_rights_limit(inst->snapshot_fd, &rights) < 0 && errno != ENOSYS) {
+            warn("cap_rights_limit(snapshot_fd) failed");
+            return (-1);
+        }
+    }
+
+    /* ── Step 5: Close all non-essential FDs ── */
+    for (int fd = 3; fd < getdtablesize(); fd++) {
+        if (!emu_is_essential_fd(inst, fd))
+            close(fd);
+    }
+
+    /* ── Step 6: Enter capability mode ── */
+    if (cap_enter() < 0) {
+        /* ENOSYS means Capsicum not available in this kernel */
+        if (errno != ENOSYS) {
+            warn("cap_enter() failed");
+            return (-1);
+        }
+        /* Capsicum not available — continue without sandbox */
+        warnx("Capsicum not available — running without sandbox");
+        return (0);
+    }
+
+    /*
+     * After cap_enter():
+     * - No new capabilities can be acquired
+     * - No new file descriptors can be opened
+     * - No access to /proc, /dev, or global namespaces
+     * - No fork(), no sysctl()
+     * - Only operations on already-open FDs with limited rights
+     */
+
+    inst->sandboxed = true;
+    return (0);
+}
+
+/* Helper: determine if a file descriptor is essential for emulation */
+static bool
+emu_is_essential_fd(struct emu_instance *inst, int fd)
+{
+    return (fd == inst->disk_fd ||
+            fd == inst->console_fd ||
+            fd == inst->gdb_fd ||
+            fd == inst->snapshot_fd ||
+            fd == STDIN_FILENO ||
+            fd == STDOUT_FILENO ||
+            fd == STDERR_FILENO);
+}
+```
+
+#### 6.5.3 bhyve Path Capsicum Implementation
+
+```c
+int
+emu_bhyve_enter_sandbox(struct emu_instance *inst)
+{
+    cap_rights_t rights;
+
+    /* ── Step 1: Limit rights on /dev/vmm/<name> FD ── */
+    /* Allow: read, write, ioctl (for VMM operations), mmap (for guest memory) */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_IOCTL, CAP_MMAP);
+    if (cap_rights_limit(inst->vmm_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(vmm_fd) failed");
+        return (-1);
+    }
+
+    /* Restrict ioctls to only VMM-related ones */
+    unsigned long vmm_ioctls[] = {
+        VM_RUN, VM_SUSPEND, VM_REINIT, VM_STATS,
+        VM_SET_CAPABILITY, VM_GET_CAPABILITY,
+        VM_SET_REGISTER_SET, VM_GET_REGISTER_SET,
+        VM_SET_MEMSEG, VM_GET_MEMSEG,
+        VM_IOMMU_MAP, VM_IOMMU_UNMAP,
+        VM_PPTDEV_MSI, VM_PPTDEV_MSIX,
+        VM_GET_VCPU_COUNT, VM_GET_DEVICE_COUNT,
+        VM_GET_DEVICE_INFO, VM_GET_MEMORY_SIZE,
+        VM_GET_TOPOLOGY, VM_SET_TOPOLOGY,
+    };
+    if (cap_ioctls_limit(inst->vmm_fd, vmm_ioctls,
+                         nitems(vmm_ioctls)) < 0 && errno != ENOSYS) {
+        warn("cap_ioctls_limit(vmm_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 2: Limit rights on disk image FD ── */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_SEEK);
+    if (cap_rights_limit(inst->disk_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(disk_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 3: Limit rights on console pipe FD ── */
+    cap_rights_init(&rights, CAP_READ, CAP_WRITE);
+    if (cap_rights_limit(inst->console_fd, &rights) < 0 && errno != ENOSYS) {
+        warn("cap_rights_limit(console_fd) failed");
+        return (-1);
+    }
+
+    /* ── Step 4: Close all non-essential FDs ── */
+    for (int fd = 3; fd < getdtablesize(); fd++) {
+        if (!emu_bhyve_is_essential_fd(inst, fd))
+            close(fd);
+    }
+
+    /* ── Step 5: Enter capability mode ── */
+    if (cap_enter() < 0) {
+        if (errno != ENOSYS) {
+            warn("cap_enter() failed");
+            return (-1);
+        }
+        warnx("Capsicum not available — running without sandbox");
+        return (0);
+    }
+
+    inst->sandboxed = true;
+    return (0);
+}
+```
+
+#### 6.5.4 Rights Inventory
+
+Each file descriptor type has a specific set of allowed capabilities:
+
+| FD Type | Allowed Rights | Rationale |
+|---------|---------------|-----------|
+| Disk image | `CAP_READ`, `CAP_WRITE`, `CAP_SEEK` | Block-level I/O for guest storage |
+| Console pipe | `CAP_READ`, `CAP_WRITE` | Serial console I/O |
+| GDB socket | `CAP_READ`, `CAP_WRITE`, `CAP_ACCEPT` | Remote debugging connections |
+| Snapshot file | `CAP_READ`, `CAP_WRITE`, `CAP_SEEK` | Save/restore emulator state |
+| `/dev/vmm/<name>` | `CAP_READ`, `CAP_WRITE`, `CAP_IOCTL`, `CAP_MMAP` | VMM control (bhyve path only) |
+| stdin/stdout/stderr | `CAP_READ`, `CAP_WRITE` | Process I/O |
+| Log file | `CAP_READ`, `CAP_WRITE`, `CAP_SEEK` | Audit logging |
+
+#### 6.5.5 Error Handling & Degraded Mode
+
+Capsicum availability varies across FreeBSD versions and kernel configurations:
+
+| Scenario | Behavior | Log Level |
+|----------|----------|-----------|
+| `cap_enter()` succeeds | Full sandbox active | INFO |
+| `cap_enter()` returns ENOSYS | Capsicum not compiled into kernel — continue without sandbox | WARNING |
+| `cap_rights_limit()` returns ENOSYS | Old kernel without Capsicum support — continue without sandbox | WARNING |
+| `cap_rights_limit()` returns EINVAL | Invalid rights combination — log error, continue without sandbox for that FD | ERROR |
+| `cap_enter()` returns EPERM | Already in capability mode or other restriction — log error, continue without sandbox | ERROR |
+
+The emulator **always continues running** even if Capsicum setup fails, operating in degraded mode. This ensures the emulation framework works on all FreeBSD systems regardless of Capsicum support.
+
+#### 6.5.6 Sysctl Controls
+
+| Sysctl | Type | Default | Description |
+|--------|------|---------|-------------|
+| `kern.emulation.sandbox_capsicum` | CTLTYPE_INT | 1 | Enable Capsicum sandboxing (0=disable, 1=enable). When disabled, the emulator skips `cap_enter()` and `cap_rights_limit()` calls entirely. |
+| `kern.emulation.sandbox_strict` | CTLTYPE_INT | 0 | Strict mode: if Capsicum setup fails, refuse to start the instance (0=degraded mode, 1=strict). In strict mode, any Capsicum failure prevents instance startup. |
+
+#### 6.5.7 Testing Capsicum Sandboxing
+
+```c
+/* Test: Verify cap_enter() succeeds */
+static int
+test_capsicum_enter(void)
+{
+    /* Fork a child process to test Capsicum */
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: attempt to enter capability mode */
+        if (cap_enter() < 0)
+            _exit(1);
+
+        /* After cap_enter(), opening a new file should fail */
+        int fd = open("/etc/passwd", O_RDONLY);
+        if (fd >= 0)
+            _exit(2);  /* Should have failed! */
+
+        _exit(0);  /* Success */
+    }
+
+    int status;
+    waitpid(pid, &status, 0);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* Test: Verify rights limitation works */
+static int
+test_capsicum_rights_limit(void)
+{
+    int pipefd[2];
+    pipe(pipefd);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: limit rights on pipe write end to CAP_WRITE only */
+        cap_rights_t rights;
+        cap_rights_init(&rights, CAP_WRITE);
+        cap_rights_limit(pipefd[1], &rights);
+
+        /* Reading from the write-only FD should fail */
+        char buf[16];
+        ssize_t n = read(pipefd[1], buf, sizeof(buf));
+        if (n >= 0)
+            _exit(1);  /* Should have failed! */
+
+        /* Writing should succeed */
+        n = write(pipefd[1], "test", 4);
+        if (n < 0)
+            _exit(2);  /* Should have succeeded! */
+
+        _exit(0);
+    }
+
+    int status;
+    waitpid(pid, &status, 0);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+```
+
+#### 6.5.8 What Capsicum Prevents
+
+After entering capability mode, the emulator process is restricted from:
+
+| Operation | Before Capsicum | After Capsicum | Impact |
+|-----------|----------------|----------------|--------|
+| Open new files | ✅ Allowed | ❌ Denied | Prevents filesystem escape via guest-triggered file open |
+| Access `/proc` | ✅ Allowed | ❌ Denied | Prevents process information leakage |
+| Access `/dev` | ✅ Allowed | ❌ Denied | Prevents device node access |
+| `sysctl()` calls | ✅ Allowed | ❌ Denied | Prevents kernel parameter modification |
+| `fork()` / `exec()` | ✅ Allowed | ❌ Denied | Prevents process injection |
+| Network sockets (new) | ✅ Allowed | ❌ Denied | Prevents lateral movement (existing socket OK) |
+| `mmap()` with new rights | ✅ Allowed | ❌ Denied | Prevents memory manipulation |
+| `ioctl()` on restricted FD | ✅ Allowed | ❌ Denied | Only allowed ioctls pass through |
+| Read/write disk image | ✅ Allowed | ✅ Allowed | Essential for emulation |
+| Read/write console | ✅ Allowed | ✅ Allowed | Essential for console I/O |
+| `clock_gettime()` | ✅ Allowed | ✅ Allowed | Essential for timer emulation |
+| Signal handling | ✅ Allowed | ✅ Allowed | Essential for crash detection |
+
+### 6.6 Timing Side-Channels
+
+The instruction decoder's variable-time execution can leak information across instances:
+
+| Concern | Risk | Mitigation |
+|---------|------|------------|
+| Variable-time instruction emulation | Medium — timing differences reveal guest activity | Use constant-time operations for security-sensitive instructions (CPUID, RDTSC). Add jitter to timer interrupts. |
+| Cache timing in MMU emulation | Low — software MMU has no hardware cache | Page table walk is always full walk (no TLB caching initially) |
+| RDTSC emulation | Medium — guest can measure instruction timing | Virtualize RDTSC to return fixed delta or add configurable jitter |
+| Memory access timing | Low — all guest memory is in emulator heap | No hardware cache effects to leak |
+
+### 6.7 VM Introspection
+
+The emulator can inspect guest memory for security monitoring:
+
+| Capability | Description | Security Use |
+|------------|-------------|--------------|
+| Guest memory read | Read any guest physical address | Detect rootkits, verify kernel integrity |
+| Register state dump | Read all guest CPU registers | Detect hidden processes, verify syscall handlers |
+| Module list inspection | List loaded kernel modules | Verify only authorized modules are loaded |
+| Syscall monitoring | Intercept guest syscalls | Detect malicious behavior patterns |
+
+**Security note:** VM introspection is a read-only capability. The emulator never writes to guest memory for security purposes (only for device emulation).
+
+### 6.8 Resource Accounting
+
+Per-instance resource tracking prevents one instance from starving others:
+
+| Resource | Tracking Method | Enforcement |
+|----------|----------------|-------------|
+| CPU time | `clock_gettime()` per execution slice | Instruction count limit per slice |
+| Memory (RSS) | Periodic `procstat` or kernel `vmspace` | `max_memory_per_user` sysctl |
+| Disk I/O | Track bytes read/written to disk image | No hard limit (disk image size is limit) |
+| Network I/O | Track bytes sent/received | Rate limiting on virtual NIC |
+
+### 6.9 rctl Integration
+
+FreeBSD's `rctl` (resource limits) subsystem provides OS-level resource enforcement:
+
+```c
+/* Apply rctl limits to emulator process */
+static void
+emu_apply_rctl(struct emu_instance *inst)
+{
+    char rule[256];
+
+    /* Memory limit */
+    snprintf(rule, sizeof(rule), "pid:%d:memoryuse:deny=%dM",
+             inst->pid, inst->config.memory_mb);
+    rctl_add_rule(rule);
+
+    /* CPU time limit */
+    snprintf(rule, sizeof(rule), "pid:%d:cputime:deny=%d",
+             inst->pid, inst->config.max_cpu_seconds);
+    rctl_add_rule(rule);
+
+    /* Process count limit (prevent fork bombs in guest) */
+    snprintf(rule, sizeof(rule), "pid:%d:nproc:deny=%d",
+             inst->pid, MAX_GUEST_PROCESSES);
+    rctl_add_rule(rule);
+}
+```
+
+### 6.10 DTrace Integration
+
+DTrace probes provide security auditing and debugging:
+
+```c
+/* DTrace provider for emulation events */
+SDT_PROVIDER_DEFINE(emu);
+
+/* Probes */
+SDT_PROBE1(emu, instance, create, entry, "struct emu_instance *");
+SDT_PROBE1(emu, instance, destroy, entry, "struct emu_instance *");
+SDT_PROBE2(emu, perm, check, entry, "struct emu_instance *, int");
+SDT_PROBE1(emu, crash, detect, entry, "struct emu_instance *");
+SDT_PROBE1(emu, sandbox, enter, entry, "struct emu_instance *");
+```
+
+**Usage:**
+```
+# Monitor all instance creation events
+dtrace -n 'emu$target:::instance-create { printf("%s created by %d", ...); }'
+
+# Monitor permission denials
+dtrace -n 'emu$target:::perm-check /arg1 == EPERM/ { printf("DENIED: %d", ...); }'
+```
+
+### 6.11 Veriexec/Integrity
+
+FreeBSD's `veriexec` provides file integrity checking:
+
+| File | Verification | Enforcement |
+|------|-------------|-------------|
+| `emu` binary | Fingerprint in `/etc/specinfo` | Prevent tampered binary from running |
+| `emu_core.ko` | Signed kernel module | Prevent unauthorized module loading |
+| Firmware blobs | SHA-256 + GPG signature | Prevent malicious firmware loading |
+| Configuration files | Fingerprint check | Detect unauthorized config changes |
+
+### 6.12 Zombie Process Handling
+
+If the emulator forks and the child crashes, zombie processes could accumulate:
+
+```c
+/* SIGCHLD handler to reap child processes */
+static void
+emu_sigchld_handler(int sig)
+{
+    int saved_errno = errno;
+    pid_t pid;
+
+    /* Reap all terminated children */
+    while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+        /* Log child exit */
+        emu_log_child_exit(pid);
+    }
+
+    errno = saved_errno;
+}
+
+/* Install handler during initialization */
+struct sigaction sa;
+memset(&sa, 0, sizeof(sa));
+sa.sa_handler = emu_sigchld_handler;
+sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+sigaction(SIGCHLD, &sa, NULL);
+```
+
+### 6.13 Swap Storm Analysis
+
+When the host runs out of memory and starts swapping heavily:
+
+| Scenario | Impact | Mitigation |
+|----------|--------|------------|
+| Host memory overcommit | Emulator pages swapped out, severe performance degradation | `memory_overcommit` sysctl (default 0), host capacity check before start |
+| Guest memory pressure | Guest experiences latency, not swap | Guest memory is in emulator heap, not guest-controlled swap |
+| OOM killer activation | Emulator process killed | OOM score adjustment (see Section 6.15) |
+| Swap thrashing | System becomes unresponsive | `memory_system_reserve_percent` reserve, balloon driver proactive release |
+
+### 6.14 devfs Rules
+
+devfs rules restrict emulator device access:
+
+```
+# devfs rule for emulator instances
+add path 'emu*' unhide
+add path 'vmm/*' unhide
+add path 'ptyp*' unhide
+add path 'ttyp*' unhide
+```
+
+**Enforcement:**
+- The emulator process only has access to `/dev/emu/<name>` and `/dev/vmm/<name>` (bhyve path)
+- All other device nodes are hidden from the emulator process
+- devfs rules are applied per-jail when running in a jail
+
+### 6.15 procfs Hardening
+
+procfs hardening for the emulator process:
+
+```c
+/* After fork, before exec: set process flags */
+static void
+emu_harden_procfs(struct emu_instance *inst)
+{
+    /* Disable core dumps */
+    struct procctl_reaper_status status;
+    procctl(P_PID, 0, PROC_REAP_ACQUIRE, &status);
+
+    /* Disable ptrace by non-root */
+    int mode = PROC_TRACE_CTL_DISABLE;
+    procctl(P_PID, 0, PROC_TRACE_CTL, &mode);
+
+    /* Disable ASLR disable (must use system ASLR) */
+    int aslr = PROC_ASLR_FORCE_ENABLE;
+    procctl(P_PID, 0, PROC_ASLR_CTL, &aslr);
+}
+```
+
+### 6.16 NUMA Considerations
+
+NUMA-aware memory allocation for the emulator:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest memory on remote NUMA node | Use `mbind()` or `vm_allocate()` with NUMA policy to bind guest memory to local node |
+| Cross-instance NUMA interference | Pin each emulator process to specific NUMA node via `cpuset` |
+| Memory bandwidth contention | Spread instances across NUMA nodes for balanced bandwidth |
+
+### 6.17 Huge Pages
+
+Huge page support for guest memory:
+
+```c
+/* Attempt to allocate guest memory with 2MB huge pages */
+static void *
+emu_alloc_hugepages(size_t size)
+{
+    void *addr;
+
+    /* Try 2MB huge pages first */
+    addr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                MAP_ANON | MAP_PRIVATE | MAP_ALIGNED_SUPER, -1, 0);
+    if (addr != MAP_FAILED)
+        return (addr);
+
+    /* Fall back to regular pages */
+    return (mmap(NULL, size, PROT_READ | PROT_WRITE,
+                 MAP_ANON | MAP_PRIVATE, -1, 0));
+}
+```
+
+### 6.18 Swap/Encryption
+
+Guest memory could contain sensitive data that leaks to swap:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest secrets in swap | `mlock()` guest memory to prevent swapping (configurable via `memory_policy` sysctl) |
+| Swap file access | Only root can read swap; encrypted swap via `geli` |
+| Core dump leakage | `PROC_DISABLE_COREDUMP` prevents guest memory in core dumps |
+
+### 6.19 KASLR
+
+Kernel address space layout randomization for the emulated environment:
+
+```c
+/* Randomize guest kernel load address */
+static uint64_t
+emu_randomize_load_addr(struct emu_instance *inst)
+{
+    uint64_t base;
+
+    /* Get random offset within guest memory */
+    arc4random_buf(&base, sizeof(base));
+    base %= (inst->mem_size - KERNEL_MAX_SIZE);
+    base &= ~(KERNEL_ALIGN - 1);  /* Align to page boundary */
+
+    return (base);
+}
+```
+
+### 6.20 SMM Emulation
+
+System Management Mode emulation for x86:
+
+| Aspect | Implementation |
+|--------|---------------|
+| SMI delivery | Assert SMI pin, save CPU state to SMRAM |
+| SMRAM protection | SMRAM is a separate memory region, not accessible from non-SMM code |
+| RSM instruction | Restore CPU state from SMRAM, return to normal mode |
+| Security | SMM code is loaded from firmware blob, not guest-writable |
+
+### 6.21 virtio Security Deep-Dive
+
+The virtio protocol is complex with a history of security bugs:
+
+| Concern | Risk | Mitigation |
+|---------|------|------------|
+| Descriptor chain depth | Guest creates extremely deep descriptor chain | Limit descriptor chain depth to 256 entries |
+| Indirect descriptors | Guest uses indirect descriptor tables to bypass limits | Validate indirect descriptor table address and length |
+| Event index | Guest exploits event index to cause notification storms | Rate-limit guest notifications, cap at 1000/sec |
+| Buffer overflow | Guest provides descriptor with invalid length | Validate all descriptor lengths against buffer sizes |
+| virtqueue alignment | Guest provides misaligned virtqueue | Reject misaligned virtqueue addresses |
+| Available ring index | Guest provides out-of-bounds available ring index | Validate index against queue size |
+| Used ring wrapping | Guest exploits used ring wraparound | Track used ring position independently |
+
+```c
+/* Validate virtqueue descriptor chain */
+static int
+emu_virtio_validate_chain(struct virtqueue *vq, uint16_t head)
+{
+    uint16_t desc_idx = head;
+    int depth = 0;
+
+    while (desc_idx != VIRTQ_DESC_F_NEXT) {
+        /* Depth limit */
+        if (depth++ > MAX_DESC_CHAIN_DEPTH)
+            return (EMU_ERR_DESC_CHAIN_TOO_DEEP);
+
+        struct vring_desc *desc = &vq->desc[desc_idx];
+
+        /* Validate descriptor address */
+        if (desc->addr + desc->len > vq->max_addr)
+            return (EMU_ERR_DESC_OUT_OF_BOUNDS);
+
+        /* Validate descriptor length */
+        if (desc->len > MAX_IO_SIZE)
+            return (EMU_ERR_DESC_TOO_LARGE);
+
+        desc_idx = desc->next;
+    }
+
+    return (0);
+}
+```
+
+### 6.22 9p/Plan 9 Filesystem Security
+
+The 9p protocol (used by virtio-9p for filesystem sharing) has known security concerns:
+
+| Concern | Risk | Mitigation |
+|---------|------|------------|
+| Path traversal in 9p walks | Guest walks outside shared directory | Validate each path component against share root |
+| Fid reuse | Guest reuses a fid with different credentials | Track fid ownership, reject reuse by different clients |
+| Authentication bypass | Guest bypasses 9p authentication | Use `map=` option for UID/GID mapping |
+| Symlink escape | Guest follows symlink outside share | Resolve all paths with `realpath()` before access |
+| Hardlink escape | Guest creates hardlink outside share | Disable hardlink creation in shared directories |
+
+### 6.23 NVMe Emulation
+
+NVMe is the standard for modern storage:
+
+| Aspect | Implementation |
+|--------|---------------|
+| Submission/completion queues | Paired SQ/CQ with configurable depth (1-4096) |
+| PRP/SGL | Physical Region Page and Scatter Gather List support |
+| Admin commands | Identify, Create/Delete I/O SQ/CQ, Get/Set Features |
+| I/O commands | Read, Write, Flush, Write Zeroes, Dataset Management |
+| Security | Validate PRP list addresses, SGL descriptor lengths, queue indices |
+
+### 6.24 TPM Emulation
+
+TPM 2.0 emulation for measured boot and disk encryption:
+
+| Aspect | Implementation |
+|--------|---------------|
+| PCR registers | 24 PCR banks (SHA-1, SHA-256, SHA-384, SHA-512) |
+| Command set | TPM2_Create, TPM2_Load, TPM2_Seal, TPM2_Unseal, TPM2_Quote |
+| NV storage | 64KB NV index space for persistent data |
+| Security | TPM state is ephemeral (not persisted to host) unless snapshot is taken |
+
+### 6.25 UEFI Secure Boot
+
+Secure Boot emulation for UEFI-based OS testing:
+
+| Aspect | Implementation |
+|--------|---------------|
+| Signature database | db, dbx, KEK, PK variables in EFI variable store |
+| Image verification | Verify PE/COFF signature against db/dbx before loading |
+| Setup mode | Allow enrollment of custom keys in setup mode |
+| Audit mode | Log signature failures without rejecting (for testing) |
+
+### 6.26 Performance Counter Security
+
+Performance counters can be used for side-channel attacks:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest reads PMU counters | Virtualize PMU counters, return fixed or jittered values |
+| Instruction counting | Limit to fixed number of retired instructions per slice |
+| Cache miss counting | Return zero or fixed values (no hardware cache in emulator) |
+| Branch prediction monitoring | Return zero (no branch predictor in emulator) |
+
+### 6.27 NMI Handling
+
+Non-Maskable Interrupt handling in the emulator:
+
+| Scenario | Behavior |
+|----------|----------|
+| Guest triggers NMI | Deliver to guest via arch-specific mechanism (x86: NMI vector, arm64: IRQ with highest priority) |
+| Watchdog timeout | Generate NMI to guest, capture crash dump if unhandled |
+| Host NMI | Not delivered to guest (host NMI is handled by host kernel) |
+
+### 6.28 ACPI Power Management
+
+Sleep state security:
+
+| State | Behavior | Security |
+|-------|----------|----------|
+| S0 (Working) | Normal emulation | N/A |
+| S1 (Standby) | Halt CPU, maintain memory | Guest cannot affect host power state |
+| S3 (Suspend-to-RAM) | Save state, halt | Snapshot saved to instance directory |
+| S4 (Suspend-to-Disk) | Save state, terminate | Snapshot saved, process exits |
+| S5 (Soft Off) | Shutdown | Instance stops, resources freed |
+
+### 6.29 MSI/MSI-X Security
+
+Message Signaled Interrupt injection security:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest injects arbitrary MSI | Validate MSI address/data against configured MSI table entries |
+| MSI-X table overflow | Validate table index against configured table size |
+| Interrupt storm | Rate-limit MSI delivery to 10000/sec per device |
+| Masked interrupt delivery | Respect MSI/MSI-X mask bits |
+
+### 6.30 DMA Remapping
+
+DMA remapping beyond basic IOMMU:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest DMA to host memory | All DMA targets guest memory only (validated by emulator) |
+| DMA to other instance memory | Each instance has separate memory region, DMA cannot cross |
+| DMA to emulator private memory | Emulator private memory is in separate address range |
+
+### 6.31 SR-IOV
+
+Single Root I/O Virtualization considerations:
+
+| Concern | Mitigation |
+|---------|------------|
+| SR-IOV passthrough to guest | Not supported — all devices are emulated |
+| VF exposure to nested VM | Not applicable — no nested virtualization |
+| Physical function access | Not applicable — no hardware passthrough |
+
+### 6.32 KSM/KSM-like Page Sharing
+
+Kernel Same-page Merging security:
+
+| Concern | Mitigation |
+|---------|------------|
+| Cross-instance page sharing leaks timing info | KSM is not used — each instance has independent memory |
+| Page merge status observable | Not applicable — no page sharing |
+| Write-protect fault timing | Not applicable — no page sharing |
+
+### 6.33 FUSE Filesystem Considerations
+
+FUSE filesystem security:
+
+| Concern | Mitigation |
+|---------|------------|
+| FUSE in guest | Guest can use FUSE internally (no host impact) |
+| FUSE on host for emulator | Not used — emulator uses direct file I/O |
+| FUSE escape | FUSE operations are contained within the guest |
+
+### 6.34 sysctl Hardening
+
+Preventing the guest from modifying host sysctls:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest modifies host sysctl | Not possible — guest cannot execute host sysctl calls |
+| Emulator modifies sysctl after Capsicum | `cap_enter()` prevents all sysctl calls |
+| Kernel module modifies sysctl | Module validates all sysctl writes via handler functions |
+
+### 6.35 PMU Emulation Security
+
+Performance Monitoring Unit emulation:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest uses PMU for side-channel | Virtualize PMU counters, return fixed values |
+| PMU interrupt injection | Validate PMU interrupt is for configured counter |
+| Counter overflow handling | Handle overflow in emulator, deliver PMI to guest |
+
+### 6.36 Watchdog Security
+
+Watchdog timer security:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest disables watchdog | Watchdog is emulated — guest cannot disable it if emulator enforces it |
+| Guest triggers watchdog flood | Rate-limit watchdog resets to 1/sec |
+| Watchdog during snapshot | Pause watchdog timer during snapshot save/restore |
+
+### 6.37 Environment Variable / Command-Line Leakage
+
+Guest configuration visibility:
+
+| Concern | Mitigation |
+|---------|------------|
+| Guest config visible via `ps aux` | Emulator process name is `emu:<name>`, no config details in argv |
+| Guest config visible via `/proc` | Capsicum blocks `/proc` access after `cap_enter()` |
+| Kernel module paths in command line | Paths are read from config file, not passed on command line |
+| Share paths in process listing | Share paths stored in config file, not in process environment |

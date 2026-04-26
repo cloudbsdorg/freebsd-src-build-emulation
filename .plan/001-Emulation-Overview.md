@@ -9,7 +9,7 @@ This document outlines a comprehensive, incremental approach to adding a kernel 
 
 **Primary Recommendation:** A unified kernel emulation framework with per-architecture kernel options (`KERNEL_EMULATION_{ARCH}`), a kernel-side emulation subsystem in `sys/emulation/`, and userland tooling in `usr.sbin/emu/` to orchestrate multiple emulated instances across different architectures simultaneously.
 
-**Security, Access Control & Filesystem Strategy:** See `002-Emulation-Security-FS.md` for the detailed security architecture, access control model, threat model, filesystem sharing strategy, and device emulation security covering both the bhyve/VMM and custom emulator paths.
+**Security, Access Control & Filesystem Strategy:** See the security chapter series (`002a-Emulation-Security-p1-ThreatModel-Isolation.md` through `002f-Emulation-Security-p6-Implementation.md`) for the detailed security architecture, access control model, threat model, filesystem sharing strategy, device emulation security, custom emulator deep-dive, additional security analysis, and implementation phases covering both the bhyve/VMM and custom emulator paths. The master index is in `000-Emulation-TOC.md`.
 
 **Architecture-Specific Emulation Details:** See the per-architecture plan files (`003-Emulation-Arch-amd64.md` through `008-Emulation-Arch-riscv.md`) for detailed instruction set specifications, register state, MMU formats, interrupt models, boot processes, CPU levels, and implementation task tables for each target architecture.
 
@@ -602,14 +602,14 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | Instruction decoder bugs causing incorrect emulation | High | Comprehensive test suite; compare against real hardware; fuzz testing |
 | Multiple instances competing for resources | Medium | Per-instance resource limits; max_instances sysctl; memory caps |
 | Race conditions in instance registry | Medium | Proper locking (`emu_instance_lock`); use `LIST` macros with mutex |
-| Emulator escape via instruction decoder exploit | Critical | Bounds checking, no JIT (no WX memory), Capsicum sandboxing (see Section 6.5 of `002-Emulation-Security-FS.md` for full implementation) |
-| Filesystem escape via shared directory symlinks | High | `realpath()` resolution, blocked path prefixes, read-only by default — see `002-Emulation-Security-FS.md` |
-| Guest resource exhaustion (CPU/memory) | High | Per-instance memory limits, instruction count limits, watchdog timers — see `002-Emulation-Security-FS.md` |
-| Network-based lateral movement from emulated instance | Medium | Host-only mode by default, MAC filtering, rate limiting — see `002-Emulation-Security-FS.md` |
-| Unauthorized non-root access to emulation framework | High | Root-only default, `kern.emulation.allow_nonroot` sysctl, `emu` group membership — see `002-Emulation-Security-FS.md` |
-| User destroys another user's instance | High | Ownership model, granular permissions, `PRIV_EMU_DESTROY` privilege — see `002-Emulation-Security-FS.md` |
-| User exhausts system resources via excessive instances | Medium | Per-user instance/memory limits, `max_instances_per_user` sysctl — see `002-Emulation-Security-FS.md` |
-| Memory overcommit causes host OOM or swap thrashing | High | Demand paging with `MAP_NORESERVE`, `memory_overcommit` sysctl (default off), `memory_warn_percent` threshold (based on total host physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin), balloon driver to reclaim memory under pressure — see `002-Emulation-Security-FS.md` |
+| Emulator escape via instruction decoder exploit | Critical | Bounds checking, no JIT (no WX memory), Capsicum sandboxing (see `002c-Emulation-Security-p3-CustomEmulator.md` Section 6.5 for full implementation) |
+| Filesystem escape via shared directory symlinks | High | `realpath()` resolution, blocked path prefixes, read-only by default — see `002d-Emulation-Security-p4-Filesystem-Devices-Crash.md` |
+| Guest resource exhaustion (CPU/memory) | High | Per-instance memory limits, instruction count limits, watchdog timers — see `002f-Emulation-Security-p6-Implementation.md` (S1, S5, S6) |
+| Network-based lateral movement from emulated instance | Medium | Host-only mode by default, MAC filtering, rate limiting — see `002d-Emulation-Security-p4-Filesystem-Devices-Crash.md` Section 8.4 |
+| Unauthorized non-root access to emulation framework | High | Root-only default, `kern.emulation.allow_nonroot` sysctl, `emu` group membership — see `002b-Emulation-Security-p2-AccessControl.md` |
+| User destroys another user's instance | High | Ownership model, granular permissions, `PRIV_EMU_DESTROY` privilege — see `002b-Emulation-Security-p2-AccessControl.md` Section 5.7 |
+| User exhausts system resources via excessive instances | Medium | Per-user instance/memory limits, `max_instances_per_user` sysctl — see `002b-Emulation-Security-p2-AccessControl.md` Section 5.10 |
+| Memory overcommit causes host OOM or swap thrashing | High | Demand paging with `MAP_NORESERVE`, `memory_overcommit` sysctl (default off), `memory_warn_percent` threshold (based on total host physical minus system-wide used memory (OS + other processes) minus already-consumed by other instances minus safety margin), balloon driver to reclaim memory under pressure — see `002f-Emulation-Security-p6-Implementation.md` Section 15 (Risks) and Phase S6 |
 | Balloon driver bug causes guest instability or memory corruption | High | Balloon operates within guest-allocated pages only, min balloon floor via `memory_balloon_min_pct`, validation of balloon target values |
 
 ---
