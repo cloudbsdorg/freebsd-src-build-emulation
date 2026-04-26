@@ -109,6 +109,7 @@ SUBDIR=	adduser \
 SUBDIR.${MK_ACCT}+=	accton
 SUBDIR.${MK_ACCT}+=	sa
 SUBDIR.${MK_AUDIT}+=	audit
+SUBDIR.${MK_EMULATION}+=	emu
 SUBDIR.${MK_AUDIT}+=	auditd
 .if ${MK_OPENSSL} != "no"
 SUBDIR.${MK_AUDIT}+=	auditdistd
