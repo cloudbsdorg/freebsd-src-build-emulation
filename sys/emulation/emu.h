@@ -1,0 +1,67 @@
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Mark LaPointe <mark@cloudbsd.org>
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#ifndef _SYS_EMU_H_
+#define	_SYS_EMU_H_
+
+/*
+ * Emulation Framework Core Header
+ *
+ * This header provides the core definitions for the kernel emulation
+ * framework, including instance management, configuration constants,
+ * and public API functions.
+ */
+
+/* Maximum number of concurrent emulation instances */
+#define	MAXEMUINSTANCES		256
+
+/* Instance state flags */
+#define	EMU_INST_RUNNING	0x0001
+#define	EMU_INST_STOPPED	0x0002
+#define	EMU_INST_PAUSED		0x0004
+#define	EMU_INST_ERROR		0x0008
+
+/* Instance permissions */
+#define	EMU_PERM_CREATE		0x0001
+#define	EMU_PERM_DESTROY	0x0002
+#define	EMU_PERM_START		0x0003
+#define	EMU_PERM_STOP		0x0004
+#define	EMU_PERM_PAUSE		0x0005
+#define	EMU_PERM_RESUME		0x0006
+#define	EMU_PERM_MODIFY		0x0007
+#define	EMU_PERM_ADMIN		0x0008
+
+/*
+ * Function prototypes for instance management
+ */
+#ifdef _KERNEL
+int	emu_instance_count(void);
+int	emu_instance_register(void);
+void	emu_instance_deregister(void);
+#endif /* _KERNEL */
+
+#endif /* !_SYS_EMU_H_ */

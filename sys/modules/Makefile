@@ -423,6 +423,7 @@ SUBDIR=	\
 	${_vmd} \
 	${_vmm} \
 	${_vmware} \
+	${_emulation} \
 	vr \
 	vte \
 	${_wbwd} \
@@ -899,6 +900,11 @@ _hwt=		hwt
 _vmm=		vmm
 .endif
 .endif
+.endif
+
+# Emulation Framework modules
+.if ${MK_EMULATION} != "no" || defined(ALL_MODULES)
+_emulation=	emu_core
 .endif
 
 .if ${MACHINE_CPUARCH} == "i386"
