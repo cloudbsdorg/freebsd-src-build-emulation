@@ -9,6 +9,8 @@ This document outlines a comprehensive, incremental approach to adding a kernel 
 
 **Primary Recommendation:** A unified kernel emulation framework with per-architecture kernel options (`KERNEL_EMULATION_{ARCH}`), a kernel-side emulation subsystem in `sys/emulation/`, and userland tooling in `usr.sbin/emu/` to orchestrate multiple emulated instances across different architectures simultaneously.
 
+**Security & Filesystem Strategy:** See `002-Emulation-Security-FS.md` for the detailed security architecture, threat model, filesystem sharing strategy, and device emulation security covering both the bhyve/VMM and custom emulator paths.
+
 ---
 
 ## 2. Motivation & Problem Statement
@@ -522,6 +524,10 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | Instruction decoder bugs causing incorrect emulation | High | Comprehensive test suite; compare against real hardware; fuzz testing |
 | Multiple instances competing for resources | Medium | Per-instance resource limits; max_instances sysctl; memory caps |
 | Race conditions in instance registry | Medium | Proper locking (`emu_instance_lock`); use `LIST` macros with mutex |
+| Emulator escape via instruction decoder exploit | Critical | Bounds checking, no JIT (no WX memory), Capsicum sandboxing — see `002-Emulation-Security-FS.md` |
+| Filesystem escape via shared directory symlinks | High | `realpath()` resolution, blocked path prefixes, read-only by default — see `002-Emulation-Security-FS.md` |
+| Guest resource exhaustion (CPU/memory) | High | Per-instance memory limits, instruction count limits, watchdog timers — see `002-Emulation-Security-FS.md` |
+| Network-based lateral movement from emulated instance | Medium | Host-only mode by default, MAC filtering, rate limiting — see `002-Emulation-Security-FS.md` |
 
 ---
 
