@@ -2,3 +2,6 @@
 SUBDIR+=	bhyve
 SUBDIR+=	bhyvectl
 .endif
+.if ${MK_EMULATION} != "no"
+SUBDIR+=	emu
+.endif

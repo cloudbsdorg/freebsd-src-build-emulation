@@ -11,6 +11,9 @@ SUBDIR+=	bhyve
 SUBDIR+=	bhyvectl
 SUBDIR+=	bhyveload
 .endif
+.if ${MK_EMULATION} != "no"
+SUBDIR+=	emu
+.endif
 SUBDIR+=	boot0cfg
 .if ${MK_TOOLCHAIN} != "no"
 SUBDIR+=	btxld

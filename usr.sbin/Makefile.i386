@@ -5,6 +5,9 @@ SUBDIR+=	acpi
 SUBDIR+=	apm
 SUBDIR+=	apmd
 .endif
+.if ${MK_EMULATION} != "no"
+SUBDIR+=	emu
+.endif
 SUBDIR+=	boot0cfg
 .if ${MK_TOOLCHAIN} != "no"
 SUBDIR+=	btxld
