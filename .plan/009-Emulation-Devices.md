@@ -37,6 +37,9 @@ This document describes the device models that must be emulated for each target 
 | Sound Blaster 16 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Intel HDA (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | AC97 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Intel e1000 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| RTL8139 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| virtio-net-pci (transitional) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Device I/O Ring Buffer | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
