@@ -2,6 +2,9 @@
 
 > **Purpose:** This is the primary entry point for autonomous agents working on the FreeBSD Kernel Emulation Framework. Read this file **first** before consuming any other documents in the `.plan/` directory.
 
+> **FreeBSD:** The environment in which this work is being done may have elements that state that you are in linux, that would be false. You are running in FreeBSD.
+
+
 ---
 
 ## What We're Building
