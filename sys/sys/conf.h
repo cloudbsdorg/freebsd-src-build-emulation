@@ -161,6 +161,7 @@ typedef int dumper_hdr_t(struct dumperinfo *di, struct kerneldumpheader *kdh);
 #define		GID_DIALER	68
 #define		GID_U2F		116
 #define		GID_VMM		978
+#define		GID_EMU		979	/* Emulation framework group */
 #define		GID_NOGROUP	65533
 #define		GID_NOBODY	65534
 

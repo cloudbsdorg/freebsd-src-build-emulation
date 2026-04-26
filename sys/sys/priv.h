@@ -544,9 +544,19 @@
 #define	PRIV_VMM_DESTROY	712	/* Can destroy other users' VMs. */
 
 /*
+ * Emulation framework privileges.
+ */
+#define	PRIV_EMU_CREATE		720	/* Can create emulation instances. */
+#define	PRIV_EMU_DESTROY	721	/* Can destroy other users' instances. */
+#define	PRIV_EMU_MODIFY		722	/* Can modify instance configuration. */
+#define	PRIV_EMU_ADMIN		723	/* Emulation administrator. */
+#define	PRIV_EMU_AUDIT		724	/* Can audit emulation activity. */
+#define	PRIV_EMU_BLOB		725	/* Can load firmware blobs. */
+
+/*
  * Track end of privilege list.
  */
-#define	_PRIV_HIGHEST		713
+#define	_PRIV_HIGHEST		726
 
 /*
  * Validate that a named privilege is known by the privilege system.  Invalid
