@@ -36,6 +36,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 #include <sys/ucred.h>
 #include <sys/group.h>
+#include <sys/jail.h>
 
 #include "emu.h"
 
@@ -86,6 +87,7 @@ emu_check_priv(struct thread *td, int priv)
  * 2. If allow_nonroot is 0, only root can access
  * 3. Users in GID_EMU group can access if allow_nonroot is 1
  * 4. Instance owner (matching UID) can access their own instance
+ * 5. Jailed processes with PR_ALLOW_EMULATION can access
  *
  * Returns 0 if access is granted, error code otherwise.
  */
@@ -109,6 +111,10 @@ emu_check_access(struct thread *td, uint64_t inst_id, int perm)
 		/* Non-root access denied */
 		return (EPERM);
 	}
+
+	/* Check if jailed with emulation permission */
+	if (jailed(cred) && prison_emulation_allowed(cred))
+		return (0);
 
 	/* Check if user is in emu group */
 	error = groupmember(GID_EMU, cred);
@@ -162,6 +168,10 @@ emu_check_create(struct thread *td)
 	if (priv_check(td, PRIV_EMU_CREATE) == 0)
 		return (0);
 
+	/* Check if jailed with emulation permission */
+	if (jailed(cred) && prison_emulation_allowed(cred))
+		return (0);
+
 	/* Check if user is in emu group */
 	if (groupmember(GID_EMU, cred) == 0)
 		return (0);
@@ -191,6 +201,10 @@ emu_check_destroy(struct thread *td, uint64_t inst_id)
 
 	/* Check for PRIV_EMU_DESTROY privilege */
 	if (priv_check(td, PRIV_EMU_DESTROY) == 0)
+		return (0);
+
+	/* Check if jailed with emulation permission */
+	if (jailed(cred) && prison_emulation_allowed(cred))
 		return (0);
 
 	/* Check instance ownership */
