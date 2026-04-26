@@ -904,7 +904,7 @@ _vmm=		vmm
 
 # Emulation Framework modules
 .if ${MK_EMULATION} != "no" || defined(ALL_MODULES)
-_emulation=	emu emu_core
+_emulation=	emu emu_core emu_amd64 emu_i386 emu_arm64 emu_arm emu_powerpc emu_riscv
 .endif
 
 .if ${MACHINE_CPUARCH} == "i386"
