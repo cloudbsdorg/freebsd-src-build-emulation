@@ -1279,7 +1279,7 @@ This section defines the complete test suite for the blob management system and 
 | `008-Emulation-Arch-riscv.md` | RISC-V firmware requirements (OpenSBI, U-Boot, DTB). Tasks RISCV.18, RISCV.19, RISCV.20. |
 | `009-Emulation-Devices.md` | Device emulation. Firmware devices section (Section 8). Tasks DEV.22-DEV.25. |
 
-### 12.2 Reference Materials
+### 13.2 Reference Materials
 
 | Resource | URL / Path | Use |
 |----------|------------|-----|
@@ -1290,7 +1290,7 @@ This section defines the complete test suite for the blob management system and 
 | Device Tree Specification | https://www.devicetree.org/ | DTS/DTB format |
 | `dtc` (Device Tree Compiler) | https://git.kernel.org/pub/scm/utils/dtc/dtc.git | DTS → DTB compilation |
 
-### 12.3 Shared Infrastructure
+### 13.3 Shared Infrastructure
 
 | Component | Shared With | Location |
 |-----------|-------------|----------|
@@ -1302,7 +1302,7 @@ This section defines the complete test suite for the blob management system and 
 
 ---
 
-## 13. Task Completion Checklist
+## 14. Task Completion Checklist
 
 > **Note for agents:** When picking up a task, fill in the **Assigned To** column with your agent name/ID. When completing a task, update the **Status** column to `COMPLETED` and add your name/ID to the **Assigned To** column if not already filled. This ensures traceability across sessions.
 
@@ -1330,7 +1330,7 @@ This section defines the complete test suite for the blob management system and 
 
 ---
 
-## 14. Future Enhancements
+## 15. Future Enhancements
 
 1. **GPG-signed manifests**: Sign `blobs.json` with the emulator's release key for additional supply chain security
 2. **Package-based blobs**: Provide blobs as FreeBSD packages (`pkg install emu-blobs-seabios`)
@@ -1345,7 +1345,7 @@ This section defines the complete test suite for the blob management system and 
 
 ---
 
-## 15. Conclusion
+## 16. Conclusion
 
 The blob management system provides a clean separation between the emulator framework and the firmware blobs it needs to operate:
 
