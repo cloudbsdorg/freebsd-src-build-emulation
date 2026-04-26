@@ -39,6 +39,12 @@ __FBSDID("$FreeBSD$");
 #include <sys/lock.h>
 #include <sys/ucred.h>
 
+MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
+
+/* Forward declarations */
+void emu_sysctl_init(void);
+void emu_sysctl_destroy(void);
+
 /*
  * Emulation Framework Core Module (emu_core.ko)
  *
@@ -167,6 +173,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 		mtx_init(&emu_instance_lock, "emu_instance", NULL, MTX_DEF);
 		emu_instance_count = 0;
 
+		/* Initialize sysctl infrastructure */
+		emu_sysctl_init();
+
 		/* Validate no conflicts */
 		/* XXX: Check for conflicting emulation frameworks */
 
@@ -190,6 +199,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 			return (EBUSY);
 		}
 		mtx_unlock(&emu_instance_lock);
+
+		/* Clean up sysctl infrastructure */
+		emu_sysctl_destroy();
 
 		/* Clean up devfs entries */
 		/* XXX: emu_devfs_destroy() when devfs support is implemented */

@@ -62,6 +62,15 @@
 int	emu_instance_count(void);
 int	emu_instance_register(void);
 void	emu_instance_deregister(void);
+
+/* Sysctl interface */
+void	emu_sysctl_init(void);
+void	emu_sysctl_destroy(void);
+int	emu_module_register(const char *name, int version);
+void	emu_module_deregister(const char *name);
+void	emu_module_refcount_inc(const char *name);
+void	emu_module_refcount_dec(const char *name);
+void	emu_sysctl_register_module(const char *name);
 #endif /* _KERNEL */
 
 #endif /* !_SYS_EMU_H_ */
