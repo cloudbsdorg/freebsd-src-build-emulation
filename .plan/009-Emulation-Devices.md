@@ -37,6 +37,8 @@ This document describes the device models that must be emulated for each target 
 | Sound Blaster 16 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Intel HDA (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | AC97 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| NE2000 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 3Com 3c509 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Intel e1000 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | RTL8139 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | virtio-net-pci (transitional) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
