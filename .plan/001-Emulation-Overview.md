@@ -9,7 +9,7 @@ This document outlines a comprehensive, incremental approach to adding a kernel 
 
 **Primary Recommendation:** A unified kernel emulation framework with per-architecture kernel options (`KERNEL_EMULATION_{ARCH}`), a kernel-side emulation subsystem in `sys/emulation/`, and userland tooling in `usr.sbin/emu/` to orchestrate multiple emulated instances across different architectures simultaneously.
 
-**Security & Filesystem Strategy:** See `002-Emulation-Security-FS.md` for the detailed security architecture, threat model, filesystem sharing strategy, and device emulation security covering both the bhyve/VMM and custom emulator paths.
+**Security, Access Control & Filesystem Strategy:** See `002-Emulation-Security-FS.md` for the detailed security architecture, access control model, threat model, filesystem sharing strategy, and device emulation security covering both the bhyve/VMM and custom emulator paths.
 
 ---
 
@@ -406,10 +406,13 @@ struct emu_config {
     char name[64];           /* Instance name (unique) */
     char arch[32];           /* Target architecture */
     int mode;                /* EMU_MODE_BHYVE or EMU_MODE_EMULATOR */
-    int memory_mb;           /* Memory size in MB */
+    int memory_mb;           /* Configured memory size in MB */
     int ncpus;               /* Number of CPUs */
     char image_path[PATH_MAX]; /* VM image path */
     char kernel_path[PATH_MAX]; /* Kernel/module path */
+    char memory_policy[16];  /* "prealloc", "demand", "balloon" */
+    int balloon_min_pct;     /* Minimum balloon size as %% of configured */
+    bool memory_overcommit;  /* Allow overcommit for this instance */
 };
 
 /* Emulation instance state (kernel side) */
@@ -422,6 +425,9 @@ struct emu_instance {
     struct emu_crash *crash; /* Crash dump (if applicable) */
     struct emu_stack *stack; /* Last captured stack trace */
     struct emu_module_list modules; /* Loaded modules in guest */
+    uint64_t memory_used;    /* Current actual memory usage in bytes */
+    uint64_t memory_balloon_target; /* Balloon target size in bytes */
+    struct mtx mem_lock;     /* Memory tracking lock */
     LIST_ENTRY(emu_instance) entries; /* List linkage */
 };
 
@@ -481,7 +487,9 @@ struct emu_instance_status {
     char mode[16];           /* "bhyve" or "emulator" */
     int pid;
     char status[16];         /* "running", "stopped", "crashed" */
-    int memory_mb;
+    int memory_mb;           /* Configured memory in MB */
+    uint64_t memory_used;    /* Actual memory used in bytes */
+    char memory_policy[16];  /* "prealloc", "demand", "balloon" */
     int ncpus;
     time_t uptime_sec;
     int console_size;        /* Bytes in console buffer */
@@ -509,6 +517,14 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | `kern.emulation.instance.<name>.stack` | CTLTYPE_STRING | Trigger/read stack trace (write to trigger, read to get) |
 | `kern.emulation.instance.<name>.console` | CTLTYPE_STRING | Read console output (read-only) |
 | `kern.emulation.instance.<name>.modules` | CTLTYPE_STRING | List loaded modules (read-only) |
+| `kern.emulation.memory_policy` | CTLTYPE_STRING | Memory allocation policy: "prealloc", "demand", "balloon" (default: "demand") |
+| `kern.emulation.memory_overcommit` | CTLTYPE_INT | Allow memory overcommit (0=off, 1=warn, 2=silent; default: 0) |
+| `kern.emulation.memory_warn_percent` | CTLTYPE_INT | Warn when configured memory exceeds this % of host RAM (default: 80) |
+| `kern.emulation.memory_balloon_min_pct` | CTLTYPE_INT | Minimum balloon size as % of configured RAM (default: 10) |
+| `kern.emulation.memory_balloon_interval` | CTLTYPE_INT | Balloon adjustment interval in seconds (default: 5) |
+| `kern.emulation.instance.<name>.memory_used` | CTLTYPE_UINT64 | Current actual memory usage in bytes (read-only) |
+| `kern.emulation.instance.<name>.memory_policy` | CTLTYPE_STRING | Per-instance memory policy override (read-only) |
+| `kern.emulation.instance.<name>.balloon_target` | CTLTYPE_UINT64 | Balloon target size in bytes (writable) |
 
 ---
 
@@ -528,6 +544,11 @@ Read/write sysctl nodes under `kern.emulation.*`:
 | Filesystem escape via shared directory symlinks | High | `realpath()` resolution, blocked path prefixes, read-only by default — see `002-Emulation-Security-FS.md` |
 | Guest resource exhaustion (CPU/memory) | High | Per-instance memory limits, instruction count limits, watchdog timers — see `002-Emulation-Security-FS.md` |
 | Network-based lateral movement from emulated instance | Medium | Host-only mode by default, MAC filtering, rate limiting — see `002-Emulation-Security-FS.md` |
+| Unauthorized non-root access to emulation framework | High | Root-only default, `kern.emulation.allow_nonroot` sysctl, `emu` group membership — see `002-Emulation-Security-FS.md` |
+| User destroys another user's instance | High | Ownership model, granular permissions, `PRIV_EMU_DESTROY` privilege — see `002-Emulation-Security-FS.md` |
+| User exhausts system resources via excessive instances | Medium | Per-user instance/memory limits, `max_instances_per_user` sysctl — see `002-Emulation-Security-FS.md` |
+| Memory overcommit causes host OOM or swap thrashing | High | Demand paging with `MAP_NORESERVE`, `memory_overcommit` sysctl (default off), `memory_warn_percent` threshold (based on total host physical minus already-consumed by other instances minus safety margin), balloon driver to reclaim memory under pressure — see `002-Emulation-Security-FS.md` |
+| Balloon driver bug causes guest instability or memory corruption | High | Balloon operates within guest-allocated pages only, min balloon floor via `memory_balloon_min_pct`, validation of balloon target values |
 
 ---
 
@@ -588,6 +609,7 @@ This section is the master checklist for implementing the kernel emulation frame
 | 2.13 | Implement `emu_console.c` — console capture | NOT STARTED | | | | 2.2 | `sys/emulation/emu_console.c` | Capture guest console output |
 | 2.14 | Implement `emu_crash.c` — crash detection | NOT STARTED | | | | 2.2 | `sys/emulation/emu_crash.c` | Detect panics, capture crash dumps |
 | 2.15 | Implement `emu_module.c` — module state tracking | NOT STARTED | | | | 2.2 | `sys/emulation/emu_module.c` | Track loaded modules in emulated environment |
+| 2.16 | Implement `emu_memmgmt.c` — memory management & tracking | NOT STARTED | | | | 2.3 | `sys/emulation/emu_memmgmt.c` | Memory policy sysctls (`memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval`), per-instance `memory_used` tracking, host memory capacity detection (total physical minus already-consumed by other instances minus safety margin), overcommit warning logic, per-instance balloon target interface |
 
 ### Phase 3: Architecture-Specific CPU Emulation
 
@@ -618,6 +640,7 @@ This section is the master checklist for implementing the kernel emulation frame
 | 4.6 | Implement bhyve stack capture | NOT STARTED | | | | 4.5 | `usr.sbin/emu/emu_bhyve.c` | Use VMM snapshot for register/stack state |
 | 4.7 | Implement bhyve VM stop/destroy | NOT STARTED | | | | 4.6 | `usr.sbin/emu/emu_bhyve.c` | Clean shutdown and resource release |
 | 4.8 | Implement bhyve snapshot/restore | NOT STARTED | | | | 4.7 | `usr.sbin/emu/emu_bhyve.c` | Fast test iteration via snapshots |
+| 4.9 | Implement virtio-balloon device for bhyve path | NOT STARTED | | | | 4.2 | `usr.sbin/bhyve/pci_virtio_balloon.c` | virtio-balloon driver for memory reclaim. Inflate/deflate via guest cooperation. Balloon target set via sysctl `kern.emulation.instance.<name>.balloon_target`. Minimum floor via `memory_balloon_min_pct`. Periodic adjustment via `memory_balloon_interval` timer. |
 
 ### Phase 5: Custom Emulator Engine (Pure Emulation Path)
 
@@ -640,18 +663,19 @@ This section is the master checklist for implementing the kernel emulation frame
 | 5.15 | Implement powerpc emulation frontend | NOT STARTED | | | | 3.12, 5.2 | `usr.sbin/emu/emu_arch_ppc.c` | powerpc-specific emulator setup |
 | 5.16 | Implement GDB stub for debugging | NOT STARTED | | | | 5.2 | `usr.sbin/emu/emu_gdb.c` | Remote GDB protocol for stack examination |
 | 5.17 | Implement snapshot/restore | NOT STARTED | | | | 5.2 | `usr.sbin/emu/emu_snapshot.c` | Save/restore emulator state |
+| 5.18 | Implement demand-paged guest memory allocation | NOT STARTED | | | | 5.2 | `usr.sbin/emu/emu_engine.c` | Use `mmap(MAP_ANON | MAP_NORESERVE)` instead of `malloc()` for guest memory. Pages are faulted in by the OS on first access. Track `memory_used` via `mincore()` or periodic RSS sampling. Support `memory_policy` values: "prealloc" (traditional `malloc`), "demand" (`mmap` with `MAP_NORESERVE`), "balloon" (prealloc + balloon device). Validate `memory_overcommit` setting against host memory capacity on instance start. |
 
 ### Phase 6: Userland Tooling (`usr.sbin/emu/`)
 
 | # | Task | Status | Owner | Start | End | Dependencies | Files | Notes |
 |---|------|--------|-------|-------|-----|--------------|-------|-------|
 | 6.1 | Create `usr.sbin/emu/` directory | NOT STARTED | | | | | | New directory for emu tool |
-| 6.2 | Implement `emu.c` — main CLI entry point | NOT STARTED | | | | 6.1 | `usr.sbin/emu/emu.c` | Command dispatch, option parsing |
+| 6.2 | Implement `emu.c` — main CLI entry point | NOT STARTED | | | | 6.1 | `usr.sbin/emu/emu.c` | Command dispatch, option parsing. Global flags: `--arch`, `--name`, `--memory`, `--memory-policy` (prealloc/demand/balloon), `--memory-overcommit`, `--cpus`, `--image`, `--kernel`, `--mode`, `--output-format` (json/tap/junit). |
 | 6.3 | Implement `emu.h` — main header | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu.h` | Shared definitions and APIs |
 | 6.4 | Implement `emu_init.c` — init command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_init.c` | Download/cache VM images, check deps |
 | 6.5 | Implement `emu_start.c` — start command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_start.c` | Start emulated instance |
 | 6.6 | Implement `emu_stop.c` — stop command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_stop.c` | Stop emulated instance |
-| 6.7 | Implement `emu_status.c` — status command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_status.c` | Show status of instances |
+| 6.7 | Implement `emu_status.c` — status command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_status.c` | Show status of instances. Displays: name, arch, mode, pid, status, configured memory, actual memory used, memory policy, cpus, uptime, console size. Supports `--output-format json` for AI-agent consumption. |
 | 6.8 | Implement `emu_list.c` — list command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_list.c` | List all instances |
 | 6.9 | Implement `emu_load.c` — load command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_load.c` | Load kernel module into instance |
 | 6.10 | Implement `emu_unload.c` — unload command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_unload.c` | Unload kernel module from instance |
@@ -660,7 +684,7 @@ This section is the master checklist for implementing the kernel emulation frame
 | 6.13 | Implement `emu_console.c` — console command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_console.c` | Attach to serial console |
 | 6.14 | Implement `emu_destroy.c` — destroy command | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_destroy.c` | Destroy emulated instance |
 | 6.15 | Implement `emu_snapshot.c` — snapshot/restore | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_snapshot.c` | Save/restore emulator state |
-| 6.16 | Implement `emu_config.c` — configuration | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_config.c` | Config file parsing (`emu.conf`) |
+| 6.16 | Implement `emu_config.c` — configuration | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_config.c` | Config file parsing (`emu.conf`). Reads `/usr/local/etc/emu.conf` and `~/.config/emu/emu.conf`. Supports: default_arch, default_memory, default_cpus, default_memory_policy, default_memory_overcommit, image_cache_dir, instance_dir, output_format. Uses XDG Base Directory spec. |
 | 6.17 | Implement `emu_output.c` — output formatting | NOT STARTED | | | | 6.2 | `usr.sbin/emu/emu_output.c` | JSON, TAP, JUnit XML output |
 | 6.18 | Implement `Makefile` for emu tool | NOT STARTED | | | | 6.2 | `usr.sbin/emu/Makefile` | Build system integration |
 | 6.19 | Add `emu` to `usr.sbin/Makefile` | NOT STARTED | | | | 6.18 | `usr.sbin/Makefile` | Add emu to SUBDIR |
@@ -695,6 +719,7 @@ This section is the master checklist for implementing the kernel emulation frame
 | 8.10 | Write integration test for cross-arch module loading | NOT STARTED | | | | 5.10–5.15 | `tests/usr.sbin/emu/cross_arch_test.sh` | Load module on non-native arch |
 | 8.11 | Write integration test for multi-instance management | NOT STARTED | | | | 6.7 | `tests/usr.sbin/emu/multi_instance_test.sh` | Run 3 instances of different archs |
 | 8.12 | Write performance benchmark | NOT STARTED | | | | 8.6 | `tests/usr.sbin/emu/benchmark.sh` | Measure emulation overhead |
+| 8.13 | Write memory management tests | NOT STARTED | | | | 2.16, 5.18 | `tests/usr.sbin/emu/memory_test.sh` | Verify demand paging reduces actual memory usage below configured. Verify balloon inflate/deflate. Verify overcommit warning at threshold. Verify prealloc mode allocates full memory. Verify `memory_used` tracking accuracy. |
 
 ### Phase 9: Documentation & Release
 
@@ -728,21 +753,31 @@ This section is the master checklist for implementing the kernel emulation frame
 
 ## 12. Task Completion Checklist
 
-- [ ] `.plan/` directory created with all plan files
-- [ ] Kernel options added to `sys/conf/options` and per-arch files
-- [ ] Kernel options added to `sys/conf/kern.opts.mk` (default no)
-- [ ] `sys/emulation/` directory created with core framework
-- [ ] Build system integration in `sys/conf/files` and per-arch files
-- [ ] EMULATION kernel config files created for each architecture
-- [ ] Architecture-specific CPU emulation implemented
-- [ ] bhyve/VMM integration implemented
-- [ ] Custom emulator engine implemented
-- [ ] `usr.sbin/emu/` directory created with CLI tool
-- [ ] Multi-instance management implemented (different archs simultaneously)
-- [ ] Stack examination and debugging implemented
-- [ ] Test suite written and passing
-- [ ] Documentation and man pages written
-- [ ] Committed to GitHub
+> **Note for agents:** When picking up a task, fill in the **Assigned To** column with your agent name/ID. When completing a task, update the **Status** column to `COMPLETED` and add your name/ID to the **Assigned To** column if not already filled. This ensures traceability across sessions.
+
+| # | Item | Category | Status | Assigned To | Dependencies | Files | Notes |
+|---|------|----------|--------|------------|--------------|-------|-------|
+| C.1 | `.plan/` directory created with all plan files | Planning | NOT STARTED | | | `.plan/` | Foundation for all tracking |
+| C.2 | Kernel options added to `sys/conf/options` and per-arch files | Build System | NOT STARTED | | C.1 | `sys/conf/options`, `sys/conf/options.amd64`, etc. | `KERNEL_EMULATION` option |
+| C.3 | Kernel options added to `sys/conf/kern.opts.mk` (default no) | Build System | NOT STARTED | | C.1 | `sys/conf/kern.opts.mk` | `KERNEL_EMULATION` make option |
+| C.4 | `sys/emulation/` directory created with core framework | Kernel | NOT STARTED | | C.2, C.3 | `sys/emulation/` | Core kernel module files |
+| C.5 | Build system integration in `sys/conf/files` and per-arch files | Build System | NOT STARTED | | C.4 | `sys/conf/files`, `sys/conf/files.amd64`, etc. | Source file registration |
+| C.6 | EMULATION kernel config files created for each architecture | Kernel | NOT STARTED | | C.5 | `sys/amd64/conf/EMULATION`, etc. | Per-arch kernel configs |
+| C.7 | Architecture-specific CPU emulation implemented | Emulator | NOT STARTED | | C.4 | Phase 3 files | amd64, arm64, riscv64, i386, arm, powerpc |
+| C.8 | bhyve/VMM integration implemented | bhyve | NOT STARTED | | C.4 | Phase 4 files | Native-speed execution path |
+| C.9 | Custom emulator engine implemented | Emulator | NOT STARTED | | C.7 | Phase 5 files | Cross-architecture execution path |
+| C.10 | `usr.sbin/emu/` directory created with CLI tool | Userland | NOT STARTED | | C.8, C.9 | Phase 6 files | `emu` command-line interface |
+| C.11 | Multi-instance management implemented | Userland | NOT STARTED | | C.10 | `usr.sbin/emu/emu_list.c`, `emu_status.c` | Different archs simultaneously |
+| C.12 | Stack examination and debugging implemented | Debugging | NOT STARTED | | C.10 | Phase 7 files | Stack capture, symbol resolution, GDB stub |
+| C.13 | Memory management sysctls implemented | Memory | NOT STARTED | | C.4 | `sys/emulation/emu_memmgmt.c` | `memory_policy`, `memory_overcommit`, `memory_warn_percent`, `memory_balloon_min_pct`, `memory_balloon_interval` |
+| C.14 | Demand-paged guest memory (`mmap MAP_NORESERVE`) implemented | Memory | NOT STARTED | | C.9 | `usr.sbin/emu/emu_engine.c` | Custom emulator demand paging |
+| C.15 | virtio-balloon device implemented for bhyve path | Memory | NOT STARTED | | C.8 | `usr.sbin/bhyve/pci_virtio_balloon.c` | bhyve memory reclaim |
+| C.16 | Per-instance `memory_used` tracking implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Actual memory usage monitoring |
+| C.17 | Memory overcommit safeguards and warnings implemented | Memory | NOT STARTED | | C.13 | `sys/emulation/emu_memmgmt.c` | Host capacity check, threshold warning |
+| C.18 | Memory management tests written and passing | Testing | NOT STARTED | | C.13–C.17 | `tests/usr.sbin/emu/memory_test.sh` | Demand paging, balloon, overcommit |
+| C.19 | Test suite written and passing | Testing | NOT STARTED | | C.18 | Phase 8 files | Unit, integration, and performance tests |
+| C.20 | Documentation and man pages written | Documentation | NOT STARTED | | C.19 | Phase 9 files | Man pages, developer docs, RELNOTES |
+| C.21 | Committed to GitHub | Release | NOT STARTED | | C.20 | | Push to repository |
 
 ---
 
@@ -756,6 +791,7 @@ The recommended approach provides:
 - **Off by default**: Safe for production systems
 - **Multi-instance support**: Run emulated environments of different architectures simultaneously
 - **Stack examination**: First-class support for debugging and AI-agent consumption
+- **Dynamic memory management**: Demand-paged memory allocation reduces host memory consumption to only actively used pages; balloon driver for bhyve path; configurable memory policy (prealloc/demand/balloon) with overcommit safeguards and warnings
 - **Incremental deployment**: Start with amd64 (bhyve), add architectures over time
 
 This approach aligns with FreeBSD's design philosophy, reuses existing VMM/bhyve infrastructure where appropriate, and builds a lightweight custom emulator for cross-architecture testing — all without external dependencies.
