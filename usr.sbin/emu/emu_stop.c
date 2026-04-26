@@ -19,334 +19,300 @@
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
-
 #include <err.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sysexits.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "emu.h"
 
+extern int g_verbose;
+extern int g_quiet;
+
 /*
- * Emulation Framework Userland Tool - Stop Command
+ * emu stop - Stop an emulated instance
  *
- * This command stops an emulated instance.
+ * Usage: emu stop [--name <name>] [--force] [--timeout <seconds>] [-v]
  */
-
-#define EMU_INSTANCE_DIR	"/var/emu"
-#define EMU_STOP_TIMEOUT	10	/* Seconds to wait for graceful shutdown */
-
-static char g_instance_name[EMU_NAME_MAX] = "";
-static int g_force = 0;
-
-static void
-usage_stop(void)
-{
-	fprintf(stderr, "Usage: emu stop [options]\n");
-	fprintf(stderr, "\nOptions:\n");
-	fprintf(stderr, "  -n, --name=NAME       Instance name (required)\n");
-	fprintf(stderr, "  -f, --force           Force immediate shutdown\n");
-	fprintf(stderr, "  -v, --verbose         Verbose output\n");
-	fprintf(stderr, "  -h, --help            Show this help message\n");
-	fprintf(stderr, "\nExamples:\n");
-	fprintf(stderr, "  emu stop --name test-instance\n");
-	fprintf(stderr, "  emu stop -n test-instance --force\n");
-	exit(EX_USAGE);
-}
-
-static int
-read_pid_file(const char *name, pid_t *pid)
-{
-	char path[MAXPATHLEN];
-	FILE *fp;
-
-	snprintf(path, sizeof(path), "%s/%s/config/pid", EMU_INSTANCE_DIR, name);
-	fp = fopen(path, "r");
-	if (fp == NULL) {
-		if (errno == ENOENT) {
-			/* No PID file - instance not running */
-			return (0);
-		}
-		warn("Failed to open PID file for %s", name);
-		return (-1);
-	}
-
-	if (fscanf(fp, "%d", pid) != 1) {
-		warnx("Failed to read PID from file");
-		fclose(fp);
-		return (-1);
-	}
-
-	fclose(fp);
-	return (1);
-}
-
-static int
-update_instance_state(const char *name, const char *state)
-{
-	char path[MAXPATHLEN];
-	FILE *fp;
-
-	snprintf(path, sizeof(path), "%s/%s/config/state", EMU_INSTANCE_DIR, name);
-	fp = fopen(path, "w");
-	if (fp == NULL) {
-		warn("Failed to update state for %s", name);
-		return (-1);
-	}
-
-	fprintf(fp, "%s\n", state);
-	fclose(fp);
-
-	return (0);
-}
-
-static int
-remove_pid_file(const char *name)
-{
-	char path[MAXPATHLEN];
-
-	snprintf(path, sizeof(path), "%s/%s/config/pid", EMU_INSTANCE_DIR, name);
-	if (unlink(path) != 0 && errno != ENOENT) {
-		warn("Failed to remove PID file for %s", name);
-		return (-1);
-	}
-
-	return (0);
-}
-
-static int
-wait_for_process_exit(pid_t pid, int timeout_sec)
-{
-	int elapsed = 0;
-
-	while (elapsed < timeout_sec) {
-		/* Check if process is still running */
-		if (kill(pid, 0) != 0) {
-			if (errno == ESRCH) {
-				/* Process exited */
-				return (0);
-			}
-			/* Some other error */
-			return (-1);
-		}
-
-		/* Wait a bit and check again */
-		usleep(100000); /* 100ms */
-		elapsed++;
-		if (elapsed >= timeout_sec * 10)
-			break;
-	}
-
-	/* Timeout - process still running */
-	return (-1);
-}
-
-static int
-stop_instance(const char *name, int force)
-{
-	pid_t pid = 0;
-	int error;
-	struct sigaction sa;
-	sigset_t block_mask;
-	siginfo_t info;
-
-	/* Read PID file */
-	error = read_pid_file(name, &pid);
-	if (error < 0)
-		return (-1);
-	if (error == 0) {
-		/* No PID file - check state */
-		char path[MAXPATHLEN];
-		char buf[64];
-		FILE *fp;
-
-		snprintf(path, sizeof(path), "%s/%s/config/state",
-		    EMU_INSTANCE_DIR, name);
-		fp = fopen(path, "r");
-		if (fp != NULL) {
-			if (fgets(buf, sizeof(buf), fp) != NULL) {
-				if (strncmp(buf, "STOPPED", 7) == 0) {
-					fclose(fp);
-					if (g_verbose)
-						printf("Instance '%s' is already stopped\n", name);
-					return (0);
-				}
-			}
-			fclose(fp);
-		}
-
-		warnx("Instance '%s' is not running (no PID file)", name);
-		return (-1);
-	}
-
-	if (g_verbose)
-		printf("Stopping instance '%s' (PID %d)...\n", name, pid);
-
-	/* Check if process is actually running */
-	if (kill(pid, 0) != 0) {
-		if (errno == ESRCH) {
-			/* Process not found - clean up stale PID file */
-			if (g_verbose)
-				printf("Process %d not found, cleaning up stale PID file\n", pid);
-			remove_pid_file(name);
-			update_instance_state(name, "STOPPED");
-			return (0);
-		}
-		warn("Failed to check process %d", pid);
-		return (-1);
-	}
-
-	/* Set up SIGCHLD handler to reap child */
-	memset(&sa, 0, sizeof(sa));
-	sa.sa_flags = SA_SIGINFO;
-	sa.sa_sigaction = NULL; /* Default action */
-	sigemptyset(&block_mask);
-	sigaction(SIGCHLD, &sa, NULL);
-
-	/* Send SIGTERM for graceful shutdown */
-	if (!force) {
-		if (g_verbose)
-			printf("Sending SIGTERM to process %d\n", pid);
-
-		if (kill(pid, SIGTERM) != 0) {
-			warn("Failed to send SIGTERM to %d", pid);
-			/* Try SIGKILL instead */
-			force = 1;
-		}
-
-		/* Wait for process to exit gracefully */
-		if (g_verbose)
-			printf("Waiting for process to exit (timeout %d seconds)...\n",
-			    EMU_STOP_TIMEOUT);
-
-		if (wait_for_process_exit(pid, EMU_STOP_TIMEOUT) != 0) {
-			if (g_verbose)
-				printf("Graceful shutdown timed out, forcing...\n");
-			force = 1;
-		}
-	}
-
-	/* Force kill if needed */
-	if (force) {
-		if (g_verbose)
-			printf("Sending SIGKILL to process %d\n", pid);
-
-		if (kill(pid, SIGKILL) != 0) {
-			if (errno == ESRCH) {
-				/* Process already exited */
-				if (g_verbose)
-					printf("Process already exited\n");
-			} else {
-				warn("Failed to send SIGKILL to %d", pid);
-				return (-1);
-			}
-		} else {
-			/* Wait for SIGKILL to take effect */
-			usleep(100000); /* 100ms */
-		}
-	}
-
-	/* Clean up PID file */
-	remove_pid_file(name);
-
-	/* Update state */
-	if (update_instance_state(name, "STOPPED") != 0) {
-		warnx("Failed to update instance state");
-		return (-1);
-	}
-
-	if (g_verbose)
-		printf("Instance '%s' stopped successfully\n", name);
-
-	return (0);
-}
-
 int
-cmd_stop(int argc, char *argv[])
+emu_cmd_stop(int argc, char *argv[])
 {
+	const char *name = NULL;
+	char sysctl_name[PATH_MAX];
+	int force = 0;
+	int timeout = 30; /* Default 30 seconds */
 	int ch;
-	int option_index;
-	static struct option long_options[] = {
-		{ "name", required_argument, NULL, 'n' },
-		{ "force", no_argument, NULL, 'f' },
-		{ "verbose", no_argument, NULL, 'v' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL, 0, NULL, 0 }
-	};
+	int error;
 
-	while ((ch = getopt_long(argc, argv, "n:fvh",
-	    long_options, &option_index)) != -1) {
+	while ((ch = getopt(argc, argv, "fn:t:v")) != -1) {
 		switch (ch) {
-		case 'n':
-			if (strlen(optarg) >= EMU_NAME_MAX) {
-				warnx("Instance name too long (max %d chars)",
-				    EMU_NAME_MAX - 1);
-				return (EX_USAGE);
-			}
-			strlcpy(g_instance_name, optarg, sizeof(g_instance_name));
-			break;
-
 		case 'f':
-			g_force = 1;
+			force = 1;
 			break;
-
+		case 'n':
+			name = optarg;
+			break;
+		case 't':
+			timeout = atoi(optarg);
+			if (timeout < 1 || timeout > 300) {
+				fprintf(stderr, "Invalid timeout (must be 1-300 seconds)\n");
+				return (EINVAL);
+			}
+			break;
 		case 'v':
 			g_verbose = 1;
 			break;
-
-		case 'h':
 		default:
-			usage_stop();
+			return (EINVAL);
 		}
 	}
 
 	argc -= optind;
 	argv += optind;
 
-	/* Validate required parameters */
-	if (g_instance_name[0] == '\0') {
-		warnx("Instance name is required (--name)");
-		return (EX_USAGE);
+	if (name == NULL) {
+		fprintf(stderr, "Usage: emu stop [--name <name>] [--force] [--timeout <seconds>] [-v]\n");
+		return (EINVAL);
 	}
 
-	/* Check if instance exists */
-	char path[MAXPATHLEN];
-	struct stat sb;
-	snprintf(path, sizeof(path), "%s/%s", EMU_INSTANCE_DIR, g_instance_name);
-	if (stat(path, &sb) != 0) {
+	if (strlen(name) >= EMU_NAME_MAX) {
+		fprintf(stderr, "Instance name too long (max %d)\n", EMU_NAME_MAX - 1);
+		return (EINVAL);
+	}
+
+	if (g_verbose)
+		printf("Stopping instance '%s' (force: %s, timeout: %ds)\n",
+		    name, force ? "yes" : "no", timeout);
+
+	/* Stop instance via kernel module sysctl */
+	snprintf(sysctl_name, sizeof(sysctl_name),
+	    "kern.emulation.instance.%s.stop", name);
+
+	if (force) {
+		/* Force kill - immediate termination */
+		error = sysctlbyname(sysctl_name, NULL, NULL, "force", strlen("force"));
+	} else {
+		/* Graceful shutdown with timeout */
+		char timeout_str[16];
+		snprintf(timeout_str, sizeof(timeout_str), "%d", timeout);
+		error = sysctlbyname(sysctl_name, NULL, NULL, timeout_str, strlen(timeout_str));
+	}
+
+	if (error != 0) {
 		if (errno == ENOENT) {
-			warnx("Instance '%s' does not exist", g_instance_name);
-			return (EX_NOINPUT);
+			fprintf(stderr, "Instance '%s' not found or not running\n", name);
+		} else if (errno == ETIMEDOUT) {
+			fprintf(stderr, "Instance '%s' did not stop within %d seconds\n",
+			    name, timeout);
+			fprintf(stderr, "Use --force to kill immediately\n");
+		} else if (errno == EPERM) {
+			fprintf(stderr, "Permission denied - you don't own instance '%s'\n", name);
+		} else {
+			fprintf(stderr, "Failed to stop instance: %s\n", strerror(errno));
 		}
-		warn("Failed to stat instance directory: %s", path);
-		return (EX_OSERR);
+		return (errno);
 	}
 
-	/* Stop the instance */
-	int error = stop_instance(g_instance_name, g_force);
-	if (error != 0)
-		return (EX_IOERR);
+	if (!g_quiet)
+		printf("Instance '%s' stopped successfully\n", name);
 
-	/* Success */
-	printf("Stopped emulated instance '%s'\n", g_instance_name);
+	return (0);
+}
+
+/*
+ * emu status - Show status of emulated instances
+ *
+ * Usage: emu status [--name <name>] [--output-format <text|json>] [-v]
+ */
+int
+emu_cmd_status(int argc, char *argv[])
+{
+	const char *name = NULL;
+	char sysctl_name[PATH_MAX];
+	char sysctl_value[1024];
+	int ch;
+	int error;
+
+	while ((ch = getopt(argc, argv, "n:o:v")) != -1) {
+		switch (ch) {
+		case 'n':
+			name = optarg;
+			break;
+		case 'o':
+			if (strcmp(optarg, "json") == 0)
+				g_output_format = EMU_OUTPUT_JSON;
+			else if (strcmp(optarg, "text") == 0)
+				g_output_format = EMU_OUTPUT_TEXT;
+			else {
+				fprintf(stderr, "Invalid output format '%s' (must be json|text)\n",
+				    optarg);
+				return (EINVAL);
+			}
+			break;
+		case 'v':
+			g_verbose = 1;
+			break;
+		default:
+			return (EINVAL);
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+
+	if (name != NULL && strlen(name) >= EMU_NAME_MAX) {
+		fprintf(stderr, "Instance name too long (max %d)\n", EMU_NAME_MAX - 1);
+		return (EINVAL);
+	}
+
+	/* Get instance status via sysctl */
+	snprintf(sysctl_name, sizeof(sysctl_name),
+	    "kern.emulation.instance.%s.status", name ? name : "all");
+
+	size_t len = sizeof(sysctl_value);
+	error = sysctlbyname(sysctl_name, sysctl_value, &len, NULL, 0);
+	if (error != 0) {
+		if (errno == ENOENT) {
+			fprintf(stderr, "Instance '%s' not found\n", name);
+		} else {
+			fprintf(stderr, "Failed to get status: %s\n", strerror(errno));
+		}
+		return (errno);
+	}
+
+	/* Output status based on format */
+	switch (g_output_format) {
+	case EMU_OUTPUT_JSON:
+		emu_output_json_begin();
+		emu_output_json_object_begin("status");
+		/* Parse sysctl_value (format: "state=RUNNING,pid=1234,memory=536870912,...") */
+		/* TODO: Implement proper JSON output parsing */
+		emu_output_json_string("raw", sysctl_value);
+		emu_output_json_object_end(0);
+		emu_output_json_end();
+		break;
+
+	case EMU_OUTPUT_TEXT:
+	default:
+		printf("Instance '%s' status:\n", name ? name : "all");
+		printf("%s\n", sysctl_value);
+		break;
+	}
+
+	return (0);
+}
+
+/*
+ * emu list - List all emulated instances
+ *
+ * Usage: emu list [--arch <arch>] [--status <status>] [--output-format <text|json>] [-v]
+ */
+int
+emu_cmd_list(int argc, char *argv[])
+{
+	const char *filter_arch = NULL;
+	const char *filter_status = NULL;
+	char sysctl_name[PATH_MAX];
+	char instance_list[4096];
+	int ch;
+	int error;
+
+	while ((ch = getopt(argc, argv, "a:s:o:v")) != -1) {
+		switch (ch) {
+		case 'a':
+			filter_arch = optarg;
+			break;
+		case 's':
+			filter_status = optarg;
+			break;
+		case 'o':
+			if (strcmp(optarg, "json") == 0)
+				g_output_format = EMU_OUTPUT_JSON;
+			else if (strcmp(optarg, "text") == 0)
+				g_output_format = EMU_OUTPUT_TEXT;
+			else {
+				fprintf(stderr, "Invalid output format '%s' (must be json|text)\n",
+				    optarg);
+				return (EINVAL);
+			}
+			break;
+		case 'v':
+			g_verbose = 1;
+			break;
+		default:
+			return (EINVAL);
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+
+	if (g_verbose) {
+		printf("Listing instances");
+		if (filter_arch)
+			printf(" (arch: %s)", filter_arch);
+		if (filter_status)
+			printf(" (status: %s)", filter_status);
+		printf("\n");
+	}
+
+	/* Get instance list via sysctl */
+	snprintf(sysctl_name, sizeof(sysctl_name),
+	    "kern.emulation.instances");
+
+	size_t len = sizeof(instance_list);
+	error = sysctlbyname(sysctl_name, instance_list, &len, NULL, 0);
+	if (error != 0) {
+		if (errno == ENOENT) {
+			fprintf(stderr, "Emulation framework not loaded\n");
+		} else {
+			fprintf(stderr, "Failed to get instance list: %s\n", strerror(errno));
+		}
+		return (errno);
+	}
+
+	if (len == 0) {
+		if (!g_quiet)
+			printf("No instances found\n");
+		return (0);
+	}
+
+	/* Output based on format */
+	switch (g_output_format) {
+	case EMU_OUTPUT_JSON:
+		emu_output_json_begin();
+		emu_output_json_array_begin("instances");
+		/* Parse comma-separated list and output as JSON array */
+		/* TODO: Implement proper JSON array output */
+		emu_output_json_string("raw", instance_list);
+		emu_output_json_array_end(0);
+		emu_output_json_end();
+		break;
+
+	case EMU_OUTPUT_TEXT:
+	default:
+		printf("%-20s %-10s %-10s %-10s %s\n",
+		    "NAME", "ARCH", "MODE", "STATUS", "UPTIME");
+		printf("%-20s %-10s %-10s %-10s %s\n",
+		    "--------------------", "----------", "----------", "----------", "----------");
+		/* Parse comma-separated list and display as table */
+		/* TODO: Implement proper table output */
+		printf("%s\n", instance_list);
+		break;
+	}
 
 	return (0);
 }
