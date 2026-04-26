@@ -6,43 +6,56 @@ This document describes the device models that must be emulated for each target 
 
 ### 1.1 Device Sharing Matrix
 
-| Device | amd64 | i386 | arm64 | arm | powerpc | riscv |
-|--------|-------|------|-------|-----|---------|-------|
-| NS16550 UART | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| PL011 UART | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
-| i8254 PIT | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| i8259 PIC | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| I/O APIC | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| LAPIC | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| HPET | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| MC146818 RTC | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| ACPI (FADT/MADT/DSDT) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| AHCI/SATA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| GICv3 (Dist/Redist/CPU IF) | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| GICv2 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| ARM Generic Timer | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| SP804 Timer | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| PL031 RTC | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
-| CLINT | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| PLIC | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| OpenPIC | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| Decrementer (SPR) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| virtio-blk | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| virtio-net | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| virtio-balloon | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| SeaBIOS (legacy BIOS) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| OVMF (UEFI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| U-Boot | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| OpenSBI | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Sound Blaster 16 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Intel HDA (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| AC97 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| NE2000 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 3Com 3c509 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Intel e1000 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| RTL8139 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| virtio-net-pci (transitional) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Device I/O Ring Buffer | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Device | Type | Interface | amd64 | i386 | arm64 | arm | powerpc | riscv |
+|--------|------|-----------|-------|------|-------|-----|---------|-------|
+| NS16550 UART | Serial | ISA/MMIO | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| PL011 UART | Serial | MMIO | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| i8254 PIT | Timer | ISA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| i8259 PIC | Interrupt | ISA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| I/O APIC | Interrupt | MMIO | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| LAPIC | Interrupt | MMIO | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| HPET | Timer | MMIO | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| MC146818 RTC | RTC | ISA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| ACPI (FADT/MADT/DSDT) | System | MMIO | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| AHCI/SATA | Storage | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| GICv3 (Dist/Redist/CPU IF) | Interrupt | MMIO | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| GICv2 | Interrupt | MMIO | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| ARM Generic Timer | Timer | SysReg | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| SP804 Timer | Timer | MMIO | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| PL031 RTC | RTC | MMIO | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| CLINT | Interrupt | MMIO | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| PLIC | Interrupt | MMIO | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| OpenPIC | Interrupt | MMIO | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Decrementer (SPR) | Timer | SysReg | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| virtio-blk | Storage | MMIO/PCI | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| virtio-net | Network | MMIO/PCI | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| virtio-balloon | Memory | MMIO/PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| SeaBIOS (legacy BIOS) | Firmware | ROM | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| OVMF (UEFI) | Firmware | Flash | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| U-Boot | Firmware | ROM | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| OpenSBI | Firmware | ROM | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Sound Blaster 16 | Sound | ISA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Intel HDA | Sound | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| AC97 | Sound | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| NE2000 | Network | ISA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 3Com 3c509 | Network | ISA | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Intel e1000 | Network | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| RTL8139 | Network | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| virtio-net-pci (transitional) | Network | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| UHCI (USB 1.1) | USB | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| OHCI (USB 1.1) | USB | PCI | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| EHCI (USB 2.0) | USB | PCI | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| xHCI (USB 3.0) | USB | PCI | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| USB HID Keyboard | Input | USB | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| USB HID Mouse | Input | USB | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| USB HID Gamepad | Input | USB | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| USB Mass Storage | Storage | USB | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| FireWire (IEEE 1394) | Bus | PCI | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| VNC Display | Display | Network | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| RDP Display | Display | Network | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Framebuffer (simple) | Display | MMIO | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Device I/O Ring Buffer | Infrastructure | Internal | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Device Driver Hook API | Infrastructure | Internal | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
