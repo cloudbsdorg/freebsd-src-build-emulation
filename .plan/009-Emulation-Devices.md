@@ -850,10 +850,10 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | DEV.19 | Implement MC146818 RTC emulation | NOT STARTED | | | `usr.sbin/emu/emu_dev_rtc.c` | I/O ports 0x70-0x71. CMOS RAM. Periodic/alarm interrupts. |
 | DEV.20 | Implement PL031 RTC emulation | NOT STARTED | | DEV.19 | `usr.sbin/emu/emu_dev_rtc.c` | ARM PrimeCell RTC. MMIO at 0x1C170000. Match register alarm. |
 | DEV.21 | Implement ACPI table generation | NOT STARTED | | | `usr.sbin/emu/emu_dev_acpi.c` | RSDP, RSDT/XSDT, FADT, DSDT, MADT, HPET. Dynamic generation. |
-| DEV.22 | Implement SeaBIOS firmware loading | NOT STARTED | | | `usr.sbin/emu/emu_firmware.c` | Load SeaBIOS binary. SMBIOS tables. PIRQ routing. |
-| DEV.23 | Implement OVMF firmware loading | NOT STARTED | | DEV.22 | `usr.sbin/emu/emu_firmware.c` | Load OVMF binary. UEFI runtime services. |
-| DEV.24 | Implement U-Boot firmware loading | NOT STARTED | | | `usr.sbin/emu/emu_firmware.c` | Load U-Boot binary. Architecture-specific entry. |
-| DEV.25 | Implement OpenSBI firmware loading | NOT STARTED | | DEV.24 | `usr.sbin/emu/emu_firmware.c` | Load OpenSBI binary. SBI services. RISC-V M-mode. |
+| DEV.22 | Implement SeaBIOS firmware loading | NOT STARTED | | | `usr.sbin/emu/emu_firmware.c` | Load SeaBIOS binary from blob cache via `emu_blob_resolve()`. SMBIOS tables. PIRQ routing. See `010-Emulation-Blob-Management.md`. |
+| DEV.23 | Implement OVMF firmware loading | NOT STARTED | | DEV.22 | `usr.sbin/emu/emu_firmware.c` | Load OVMF binary from blob cache via `emu_blob_resolve()`. UEFI runtime services. See `010-Emulation-Blob-Management.md`. |
+| DEV.24 | Implement U-Boot firmware loading | NOT STARTED | | | `usr.sbin/emu/emu_firmware.c` | Load U-Boot binary from blob cache via `emu_blob_resolve()`. Architecture-specific entry. See `010-Emulation-Blob-Management.md`. |
+| DEV.25 | Implement OpenSBI firmware loading | NOT STARTED | | DEV.24 | `usr.sbin/emu/emu_firmware.c` | Load OpenSBI binary from blob cache via `emu_blob_resolve()`. SBI services. RISC-V M-mode. See `010-Emulation-Blob-Management.md`. |
 | DEV.26 | Write device emulation unit tests | NOT STARTED | | DEV.1-DEV.25 | `tests/usr.sbin/emu/device/` | Test each device: register read/write, interrupt generation, data transfer. |
 | DEV.27 | Write device integration tests | NOT STARTED | | DEV.26 | `tests/usr.sbin/emu/device_integration.sh` | Boot FreeBSD in emulator. Verify console output. Verify disk access. Verify network. |
 
@@ -873,6 +873,7 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | `006-Emulation-Arch-arm.md` | ARM device requirements (GICv2, SP804, PL011, PL031). |
 | `007-Emulation-Arch-powerpc.md` | PowerPC device requirements (OpenPIC, Decrementer, NS16550). |
 | `008-Emulation-Arch-riscv.md` | RISC-V device requirements (CLINT, PLIC, NS16550). |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware blobs (SeaBIOS, OVMF, U-Boot, OpenSBI, DTB). |
 
 ### 10.2 Reference Materials
 

@@ -352,6 +352,7 @@ Same as Sv39 but with 4 levels and 48-bit virtual address:
 |----------|-------------|
 | `001-Emulation-Overview.md` | Main implementation plan. Phase 3 (Architecture-Specific CPU Emulation), Phase 5 (Custom Emulator Engine). |
 | `002-Emulation-Security-FS.md` | Security architecture. |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware loading (OpenSBI, U-Boot, DTB). |
 
 ### 7.2 Reference Materials
 

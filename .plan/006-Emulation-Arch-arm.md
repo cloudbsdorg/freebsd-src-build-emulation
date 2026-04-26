@@ -238,6 +238,7 @@ Same GIC architecture as arm64 (see `005-Emulation-Arch-arm64.md` Section 4.4), 
 | `001-Emulation-Overview.md` | Main implementation plan. Phase 3 (Architecture-Specific CPU Emulation). |
 | `002-Emulation-Security-FS.md` | Security architecture. |
 | `005-Emulation-Arch-arm64.md` | ARM64 architecture. Shares GIC, PL011 UART, and device tree infrastructure. |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware loading (U-Boot). |
 
 ### 7.2 Reference Materials
 

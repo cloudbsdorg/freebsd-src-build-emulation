@@ -443,6 +443,7 @@ Each exception level has its own vector table, pointed to by `VBAR_ELx`. The tab
 | `001-Emulation-Overview.md` | Main implementation plan. Phase 3 (Architecture-Specific CPU Emulation), Phase 5 (Custom Emulator Engine). |
 | `002-Emulation-Security-FS.md` | Security architecture. |
 | `006-Emulation-Arch-arm.md` | ARM 32-bit architecture. Shares GIC, timer, and UART infrastructure. |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware loading (U-Boot, OVMF, DTB). |
 
 ### 7.2 Reference Materials
 

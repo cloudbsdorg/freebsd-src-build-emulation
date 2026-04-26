@@ -214,6 +214,7 @@ PowerPC uses fixed 32-bit instruction encoding:
 |----------|-------------|
 | `001-Emulation-Overview.md` | Main implementation plan. Phase 3 (Architecture-Specific CPU Emulation). |
 | `002-Emulation-Security-FS.md` | Security architecture. |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware loading (U-Boot). |
 
 ### 7.2 Reference Materials
 

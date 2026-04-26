@@ -325,6 +325,7 @@ Same as amd64 (see `003-Emulation-Arch-amd64.md` Section 5.4):
 | `001-Emulation-Overview.md` | Main implementation plan. Phase 3 (Architecture-Specific CPU Emulation). |
 | `002-Emulation-Security-FS.md` | Security architecture. |
 | `003-Emulation-Arch-amd64.md` | AMD64 architecture. Shares instruction decoder, MMU, and interrupt infrastructure. All amd64 tasks apply to i386 with 32-bit operand size. |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware loading (SeaBIOS). |
 
 ### 7.2 Reference Materials
 
