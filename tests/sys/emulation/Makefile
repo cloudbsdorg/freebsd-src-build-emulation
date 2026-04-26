@@ -31,7 +31,7 @@ TESTSDIR=	${TESTSBASE}/sys/emulation
 
 BINDIR=		${TESTSDIR}
 
-ATF_TESTS_SH+=	module_test
+ATF_TESTS_SH+=	module_test acl_test
 
 ${PACKAGE}FILES+=	utils.subr
 
