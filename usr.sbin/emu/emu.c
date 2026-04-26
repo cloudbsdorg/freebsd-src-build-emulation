@@ -38,6 +38,7 @@ __FBSDID("$FreeBSD$");
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <grp.h>
 #include <paths.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,8 +88,10 @@ static struct emu_command commands[] = {
 };
 
 /* Global options */
-int g_verbose = 0;
-int g_quiet = 0;
+static int g_verbose = 0;
+static int g_quiet = 0;
+static gid_t g_emu_group = 0; /* 0 means use default GID_EMU */
+static char *g_emu_group_name = NULL; /* Group name if specified */
 static enum emu_output_format g_output_format = EMU_OUTPUT_TEXT;
 
 static void
@@ -101,10 +104,11 @@ usage(void)
 		    commands[i].shortdesc);
 	}
 	fprintf(stderr, "\nGlobal options:\n");
-	fprintf(stderr, "  -v, --verbose    Verbose output\n");
-	fprintf(stderr, "  -q, --quiet      Quiet output\n");
-	fprintf(stderr, "  -o, --output=FMT Output format (text/json/tap/junit)\n");
-	fprintf(stderr, "  -h, --help       Show help message\n");
+	fprintf(stderr, "  -v, --verbose       Verbose output\n");
+	fprintf(stderr, "  -q, --quiet         Quiet output\n");
+	fprintf(stderr, "  -o, --output=FMT    Output format (text/json/tap/junit)\n");
+	fprintf(stderr, "  -g, --emu-group=GID Group for non-root operation (default: emu group)\n");
+	fprintf(stderr, "  -h, --help          Show help message\n");
 	fprintf(stderr, "\nRun 'emu help <command>' for more information on a command.\n");
 	exit(EX_USAGE);
 }
@@ -198,12 +202,13 @@ main(int argc, char *argv[])
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
 		{ "output", required_argument, NULL, 'o' },
+		{ "emu-group", required_argument, NULL, 'g' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	/* Parse global options */
-	while ((ch = getopt_long(argc, argv, "vqo:h", long_options,
+	while ((ch = getopt_long(argc, argv, "vqo:g:h", long_options,
 	    &option_index)) != -1) {
 		switch (ch) {
 		case 'v':
@@ -224,6 +229,22 @@ main(int argc, char *argv[])
 			else {
 				warnx("Unknown output format: %s", optarg);
 				usage();
+			}
+			break;
+ 		case 'g':
+			/* Parse group name or GID */
+			if (optarg[0] >= '0' && optarg[0] <= '9') {
+				/* Numeric GID */
+				g_emu_group = (gid_t)strtoul(optarg, NULL, 10);
+			} else {
+				/* Group name - lookup via getgrnam() */
+				struct group *gr = getgrnam(optarg);
+				if (gr == NULL) {
+					warnx("Unknown group: %s", optarg);
+					usage();
+				}
+				g_emu_group = gr->gr_gid;
+				g_emu_group_name = strdup(optarg);
 			}
 			break;
 		case 'h':
