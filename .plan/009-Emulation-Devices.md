@@ -34,6 +34,10 @@ This document describes the device models that must be emulated for each target 
 | OVMF (UEFI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | U-Boot | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | OpenSBI | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Sound Blaster 16 (ISA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Intel HDA (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| AC97 (PCI) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Device I/O Ring Buffer | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
