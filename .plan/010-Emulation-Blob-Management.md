@@ -1089,9 +1089,183 @@ Firmware blobs are executed in the emulated environment, not on the host:
 
 ---
 
-## 12. Cross-References
+## 12. Comprehensive Test Plan
 
-### 12.1 Related Plan Documents
+This section defines the complete test suite for the blob management system and CPU model database. Tests are organized by component and functionality. Each test includes:
+
+- **Test ID**: Unique identifier for traceability
+- **Category**: Which component/functionality is being tested
+- **Test Description**: What the test does
+- **Input**: Test inputs and conditions
+- **Expected Behavior**: What should happen on success
+- **Failure Modes**: How the test should fail and what errors to expect
+- **Edge Cases**: Boundary conditions and corner cases to verify
+
+### 12.1 Blob Manifest Tests
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-MAN-001 | Manifest Parsing | Parse valid `blobs.json` manifest | Well-formed JSON with all blob entries | Returns parsed manifest with all fields populated correctly | Malformed JSON → parse error; Missing required fields → validation error | Empty manifest (no blobs); Single blob; Maximum blobs |
+| T-MAN-002 | Manifest Parsing | Parse manifest with missing required fields | JSON missing `version`, `blobs`, or blob sub-fields | Returns validation error identifying missing field | Silent acceptance of invalid manifest → bug | Missing `url` but has `build_method` (DTB case); Missing `sha256` |
+| T-MAN-003 | Manifest Parsing | Parse manifest with unknown blob IDs | Manifest with unrecognized blob IDs | Returns warning for unknown IDs, continues parsing known ones | Crash on unknown ID → bug | All IDs unknown; Mix of known and unknown |
+| T-MAN-004 | Manifest Parsing | Parse manifest with version mismatch | Manifest with `version` field different from expected | Returns version mismatch warning, attempts forward-compatible parsing | Crash on version mismatch → bug | Newer version with extra fields; Older version with missing fields |
+| T-MAN-005 | Manifest Validation | Validate blob checksum format | Manifest with valid/invalid SHA-256 strings | Validates SHA-256 format (64 hex chars) | Accepts invalid hex → bug; Rejects valid hex → bug | Mixed case hex; Short hash; Hash with non-hex characters |
+| T-MAN-006 | Manifest Validation | Validate blob URL format | Manifest with valid/invalid URLs | Validates URL format (http/https) | Accepts invalid URL → bug; Rejects valid URL → bug | FTP URLs; File URLs; URLs with authentication; Empty URLs (DTB case) |
+| T-MAN-007 | Manifest Validation | Validate architecture list | Manifest with valid/invalid arch strings | Validates against known architecture list | Accepts unknown arch → bug; Rejects valid arch → bug | Empty arch list; Single arch; All architectures |
+| T-MAN-008 | Manifest Versioning | Check manifest version compatibility | Manifest v1, v2 (future), v0 (invalid) | v1 accepted; v2 accepted with forward-compat; v0 rejected | Rejects v1 → bug; Accepts v0 → bug | Version as string vs integer; Missing version field |
+
+### 12.2 Blob Download Tests (emu blob fetch)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-FETCH-001 | Download | Download a single blob successfully | Valid blob ID with reachable URL | Downloads file, verifies checksum, places in cache directory | Network timeout → retry with backoff; Connection refused → clear error message | Very large blob (>100MB); Very small blob (<1KB) |
+| T-FETCH-002 | Download | Download multiple blobs simultaneously | Multiple valid blob IDs | Downloads all blobs, reports success/failure per blob | One blob fails → others continue; All fail → aggregate error | 0 blobs (no-op); 10+ blobs (stress test) |
+| T-FETCH-003 | Download | Download blob that is already cached | Already-cached blob ID | Skips download, reports "already cached" | Re-downloads unnecessarily → wasted bandwidth | Cached blob with --force flag → re-downloads |
+| T-FETCH-004 | Download | Download with --force flag | Already-cached blob ID with --force | Re-downloads and overwrites cached version | Fails to overwrite → stale cache; Deletes old before new succeeds → data loss | Corrupted cached file → --force fixes it |
+| T-FETCH-005 | Download | Download with --arch filter | `--arch amd64` flag | Downloads only blobs for amd64 architecture | Downloads wrong arch blobs → bug; Downloads nothing when blobs exist → bug | Arch with no blobs; Arch with single blob; All archs |
+| T-FETCH-006 | Download | Download with --all flag | `--all` flag | Downloads all blobs for all architectures | Misses some blobs → bug; Downloads blobs for unsupported archs → bug | Empty manifest; Single blob manifest |
+| T-FETCH-007 | Download | Download from URL that returns redirect | URL with HTTP 301/302 redirect | Follows redirect, downloads from final URL | Fails to follow redirect → broken download; Follows redirect to wrong URL → security issue | Redirect chain (3+ hops); Redirect to HTTPS; Redirect to different domain |
+| T-FETCH-008 | Download | Download from URL that returns error | URL returning HTTP 404/403/500 | Reports HTTP error with status code and URL | Retries indefinitely → hangs; Silent failure → confusing | 404 (not found); 403 (forbidden); 500 (server error); 429 (rate limit) |
+| T-FETCH-009 | Download | Download with checksum verification | Valid blob with matching checksum | Verifies SHA-256 after download, reports success | Skips verification → security issue; Fails on valid checksum → bug | Checksum file missing → warning but continue; Multiple checksum files |
+| T-FETCH-010 | Download | Download with checksum mismatch | Valid blob with intentionally wrong checksum in manifest | Detects mismatch, deletes downloaded file, reports corruption error | Keeps corrupted file → security issue; Reports success on mismatch → bug | Partial download (interrupted); Download of wrong file; Corrupted in transit |
+| T-FETCH-011 | Download | Download with --no-verify flag | Valid blob with --no-verify | Downloads without checksum verification | Still verifies → ignores flag; Skips verification silently → misleading | Corrupted download with --no-verify → no error (expected) |
+| T-FETCH-012 | Download | Download to custom cache directory | `--cache-dir /tmp/test-cache` | Downloads to specified directory instead of default | Downloads to default anyway → bug; Fails if custom dir doesn't exist → should create | Custom dir with existing blobs; Custom dir on different filesystem |
+| T-FETCH-013 | Download | Download with archive extraction | Blob URL pointing to zip/tar.gz archive | Downloads archive, extracts files to blob directory | Fails to extract → broken blob; Extracts to wrong directory → bug | Nested archives; Archive with directory structure; Empty archive |
+| T-FETCH-014 | Download | Download with progress display | Terminal with --progress flag | Shows progress bar with percentage, speed, ETA | No progress shown → poor UX; Progress causes performance issues → bug | Pipe (non-TTY) → progress suppressed; Very fast download → progress flashes briefly |
+| T-FETCH-015 | Download | Network timeout handling | Unreachable URL with short timeout | Retries with exponential backoff (3 attempts), then reports failure | Retries forever → hangs; Gives up immediately → fragile | Intermittent network; DNS failure; Connection timeout vs read timeout |
+
+### 12.3 Blob List Tests (emu blob list)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-LIST-001 | Listing | List all blobs with status | No filters | Shows table with all blobs, their status (installed/missing/outdated), version, size | Crashes on empty cache → bug; Shows incorrect status → bug | No blobs installed; All blobs installed; Mix of installed/missing |
+| T-LIST-002 | Listing | List blobs filtered by architecture | `--arch arm64` | Shows only blobs for arm64 architecture | Shows blobs for wrong arch → bug; Shows nothing when blobs exist → bug | Arch with no blobs; Arch with all blobs installed |
+| T-LIST-003 | Listing | List only installed blobs | `--installed` | Shows only blobs that are present in cache | Shows missing blobs → bug; Shows nothing when blobs installed → bug | No installed blobs; All installed |
+| T-LIST-004 | Listing | List only missing blobs | `--missing` | Shows only blobs not present in cache | Shows installed blobs → bug | No missing blobs; All missing |
+| T-LIST-005 | Listing | List only outdated blobs | `--outdated` | Shows only blobs with newer version available | Shows up-to-date blobs → bug; Misses outdated blobs → bug | No outdated blobs; All outdated; Version string comparison edge cases |
+| T-LIST-006 | Listing | List with JSON output | `--json` | Outputs valid JSON array of blob objects | Invalid JSON → bug; Missing fields → bug; Wrong structure → bug | Empty list → empty JSON array; Single blob → single-element array |
+| T-LIST-007 | Listing | List with combined filters | `--arch amd64 --installed` | Shows only installed amd64 blobs | Ignores one filter → bug; Returns empty when results exist → bug | Conflicting filters (no matches); All filters match everything |
+| T-LIST-008 | Listing | List CPU models | `--cpu-models` flag | Shows available CPU models for the architecture | Shows blob data instead → bug; Missing CPU model info → bug | Arch with no CPU models; All models listed |
+
+### 12.4 Blob Verify Tests (emu blob verify)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-VFY-001 | Verification | Verify all installed blobs | `--all` flag | Reads checksum files, compares with actual files, reports all as valid | Reports valid as invalid → false positive; Reports invalid as valid → false negative | Empty cache → no-op; Single blob; Many blobs |
+| T-VFY-002 | Verification | Verify specific blob | Specific blob ID | Verifies only that blob's checksum | Verifies wrong blob → bug; Verifies all blobs → ignores filter | Blob not installed → reports missing; Unknown blob ID → error |
+| T-VFY-003 | Verification | Verify with checksum mismatch | Blob with intentionally corrupted content | Detects mismatch, reports which file failed, which checksum expected vs actual | Silent on mismatch → security issue; Wrong error message → confusing | Single bit flip; Entirely different file; Empty file; Truncated file |
+| T-VFY-004 | Verification | Verify with --fix flag | Corrupted blob with --fix | Re-downloads corrupted blob, verifies new download | Fails to re-download → corruption persists; Re-downloads valid blob unnecessarily | Network unavailable during --fix → reports failure; Multiple corrupted blobs |
+| T-VFY-005 | Verification | Verify blob with missing checksum file | Blob installed but no .sha256 file | Reports warning about missing checksum, skips verification | Crashes on missing checksum → bug; Assumes valid without checksum → security issue | Checksum file deleted; Checksum file permissions issue |
+| T-VFY-006 | Verification | Verify blob with wrong file permissions | Blob file with 0000 permissions | Reports permission error, suggests fix | Silent failure → confusing; Crashes → bug | Read-only filesystem; File owned by different user |
+
+### 12.5 Blob Remove Tests (emu blob remove)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-RMV-001 | Removal | Remove a single blob | Specific blob ID | Removes blob files and checksum files from cache | Leaves orphaned files → bug; Removes wrong blob → bug | Blob not installed → reports not found; Blob with multiple files |
+| T-RMV-002 | Removal | Remove all blobs | `--all` flag | Removes all blob files and directories from cache | Leaves some files → bug; Removes non-blob files → data loss | Empty cache → no-op; Cache with non-blob files (should not touch) |
+| T-RMV-003 | Removal | Remove with confirmation prompt | Blob ID without --force | Prompts for confirmation before removing | Removes without prompt → data loss; Prompts in non-interactive mode → hangs | Non-interactive terminal → should skip prompt; --force flag → skip prompt |
+| T-RMV-004 | Removal | Remove with --force flag | Blob ID with --force | Removes without confirmation prompt | Still prompts → ignores flag; Removes without any safety check → data loss | Removing blobs in use by running instance → should warn |
+| T-RMV-005 | Removal | Remove by architecture | `--arch amd64` | Removes only blobs for specified architecture | Removes wrong arch → bug; Removes nothing when blobs exist → bug | Arch with no installed blobs; All archs |
+
+### 12.6 Blob Build Tests (emu blob build)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-BLD-001 | Building | Build DTB blob from DTS source | `dtb-virt-arm64` blob ID | Invokes `dtc`, compiles DTS to DTB, places in cache | `dtc` not installed → clear error with install instructions; Compilation error → reports DTS error | DTS with syntax error; DTS with warnings; DTS with includes |
+| T-BLD-002 | Building | Build DTB with custom dtc path | `--dtc-path /usr/local/bin/dtc` | Uses specified dtc binary | Uses wrong dtc → wrong output; Fails if dtc not at path → clear error | dtc path with spaces; dtc path that doesn't exist |
+| T-BLD-003 | Building | Build non-DTB blob (e.g., SeaBIOS) | `seabios` blob ID | Prints build instructions (clone repo, make, copy output) | Tries to build automatically → unexpected dependency; Silent no-op → confusing | Blob with no build_from_source entry; Blob with null repository |
+| T-BLD-004 | Building | Build all buildable blobs | `--all` flag | Builds all blobs that have build methods (DTBs) | Tries to build non-buildable blobs → bug; Misses buildable blobs → bug | No buildable blobs; Mix of buildable and non-buildable |
+
+### 12.7 Blob Info Tests (emu blob info)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-INF-001 | Information | Show info for specific blob | Valid blob ID | Displays all fields: name, description, version, license, URL, checksum, size, load address, status | Missing fields → bug; Wrong values → bug | Blob not installed → shows info but marks as missing; Unknown blob ID → error |
+| T-INF-002 | Information | Show info with JSON output | `--json` flag | Outputs valid JSON with all blob fields | Invalid JSON → bug; Missing fields → bug | Blob with null fields (DTB with no URL); Blob with multiple files |
+| T-INF-003 | Information | Show info for blob with build instructions | Blob with build_from_source | Displays build instructions, repository URL, output path | Missing build info → bug; Wrong build info → bug | Blob with null build_from_source; Blob with only build instructions (no URL) |
+
+### 12.8 Blob Path Tests (emu blob path)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-PTH-001 | Path Resolution | Resolve path to blob directory | Blob ID without filename | Prints path to blob's cache directory | Prints wrong path → bug; Prints file path instead → bug | Blob not installed → exit code 5 with error message |
+| T-PTH-002 | Path Resolution | Resolve path to specific blob file | Blob ID with filename | Prints full path to specific file | Prints wrong file → bug; Prints directory path → bug | File doesn't exist → exit code 5; Multiple files in blob |
+| T-PTH-003 | Path Resolution | Resolve path with cache resolution order | Blob in user cache only | Finds blob in user cache (not system cache) | Finds in wrong cache location → bug; Misses blob in user cache → bug | Blob in system cache only; Blob in both caches (system takes priority); Blob in instance override |
+| T-PTH-004 | Path Resolution | Resolve path for scripting | Command in shell script | Returns clean path without extra output, suitable for variable assignment | Extra output (progress, status) → breaks scripts; Trailing newline issues → bug | Path with spaces; Path with special characters |
+
+### 12.9 Blob Update Tests (emu blob update)
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-UPD-001 | Update | Update manifest from upstream | No options | Fetches latest manifest, merges with local, reports changes | Network error → keeps local manifest; Merge conflict → reports conflict | No changes (same version); New blobs added; Blobs removed; Version bump |
+| T-UPD-002 | Update | Check for updates without downloading | `--check-only` | Compares local version with upstream, reports if update available | Downloads anyway → ignores flag; Reports wrong version → bug | Local is latest; Local is outdated; Local is newer (downgrade needed) |
+| T-UPD-003 | Update | Update with custom URL | `--url https://example.com/manifest.json` | Fetches manifest from specified URL | Ignores custom URL → bug; Fails on invalid URL → clear error | URL returns invalid manifest; URL returns redirect |
+
+### 12.10 Cache Management Tests
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-CCH-001 | Cache | Create cache directory structure | First blob fetch | Creates `/var/emu/blobs/` (or `~/.cache/emu/blobs/`) with correct permissions | Fails to create → download fails; Wrong permissions → security issue | Parent directory doesn't exist; Read-only filesystem; Disk full |
+| T-CCH-002 | Cache | Cache resolution order | Blob in multiple cache locations | Returns path from highest-priority location (instance > system > user > build) | Returns wrong priority → bug; Misses blob in higher priority → bug | Instance override with different version; All locations have the blob |
+| T-CCH-003 | Cache | Cache with non-root user | Non-root user running emu blob | Uses `~/.cache/emu/blobs/` instead of `/var/emu/blobs/` | Tries to write to `/var/emu/blobs/` → permission error; Falls back incorrectly → bug | User with write access to `/var/emu/blobs/` (emu group); User with no home directory |
+| T-CCH-004 | Cache | Cache with EMU_BLOB_DIR override | Environment variable set | Uses specified directory instead of default | Ignores env var → bug; Fails if dir doesn't exist → should create | Env var points to relative path; Env var with trailing slash |
+| T-CCH-005 | Cache | Concurrent cache access | Multiple simultaneous blob operations | Proper locking, no corrupted files | Race condition → corrupted cache; Deadlock → hangs | Two fetches of same blob; Fetch and verify simultaneously; Fetch and remove simultaneously |
+
+### 12.11 CPU Model Tests
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-CPU-001 | CPU Models | Parse valid `cpu_models.json` | Well-formed JSON with all CPU models | Returns parsed model database with all fields | Malformed JSON → parse error; Missing fields → validation error | Empty models list; Single model; All architectures |
+| T-CPU-002 | CPU Models | Select CPU model by ID | `x86-64-v3` model ID | Returns full model specification for that ID | Unknown ID → error; Wrong model returned → bug | Case sensitivity (X86-64-V3 vs x86-64-v3); Model with special characters in ID |
+| T-CPU-003 | CPU Models | List CPU models for architecture | `--arch amd64` | Returns only models for that architecture | Returns models for wrong arch → bug; Returns empty when models exist → bug | Arch with no models; Arch with many models |
+| T-CPU-004 | CPU Models | Apply CPU model to instance config | Model ID + instance config | Sets CPUID features, MSR values, timer frequencies, cache topology from model | Missing features → wrong emulation; Wrong values → incorrect behavior | Model with partial data (some null fields); Model with conflicting settings |
+| T-CPU-005 | CPU Models | CPU model with speed override | Model ID + `--cpu-speed 100` | Uses model's feature set but overridden speed | Ignores speed override → bug; Overrides features too → bug | Speed of 0 (use default); Very high speed; Very low speed |
+| T-CPU-006 | CPU Models | CPU model compatibility validation | Model ID + architecture | Validates model is compatible with specified architecture | Allows incompatible model → wrong emulation; Rejects compatible model → bug | Model for different arch; Model for same arch but different ISA version |
+| T-CPU-007 | CPU Models | CPU model JSON schema validation | Model with invalid fields | Validates against schema, reports validation errors | Accepts invalid model → bug; Rejects valid model → bug | Missing required fields; Extra unknown fields; Wrong types (string instead of int) |
+| T-CPU-008 | CPU Models | CPU model for legacy compatibility | `i386` model with `--cpu-speed 66` | Sets up 66MHz CPU for Windows 95 compatibility | Speed too high → Windows 95 crashes; Missing legacy features → boot failure | Speed exactly at known problematic threshold (2GHz for Win95); Model with known errata |
+
+### 12.12 Integration Tests
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-INT-001 | Integration | Full blob lifecycle | Fetch → verify → list → info → path → remove | All commands succeed in sequence, cache is clean at end | Any step fails → integration broken; Cache left dirty → side effects | Interrupted lifecycle (remove before verify); Repeated lifecycle |
+| T-INT-002 | Integration | Missing blob error message | Start instance without required blob | Clear error message with blob ID, download command, manual instructions | Generic error → poor UX; Wrong blob ID → confusing; Missing download URL → unhelpful | Multiple missing blobs → lists all; Blob for wrong arch → suggests correct arch |
+| T-INT-003 | Integration | First-run experience | Fresh install, no blobs | Helpful message guiding user through first blob fetch | No guidance → user confused; Technical error → intimidating | User with no network access → suggests manual download; User without permissions → suggests sudo |
+| T-INT-004 | Integration | Blob resolution in firmware loading | Instance start with cached blob | Firmware loaded from cache, instance boots successfully | Blob not found → boot failure; Wrong blob loaded → boot failure | Blob in user cache (non-root); Blob in system cache (root); Blob in instance override |
+| T-INT-005 | Integration | DTB building and loading | Build DTB → start arm64 instance | DTB compiled, loaded, instance recognizes devices | DTB missing devices → device not found; DTB wrong addresses → MMIO fault | DTB with all devices; DTB with minimal devices; DTB with custom device |
+| T-INT-006 | Integration | CPU model selection and boot | Select CPU model → start instance | Instance boots with correct CPU features exposed | Wrong features → software crashes; Missing features → boot failure | Legacy CPU model (i386 at 66MHz); Modern CPU model (x86-64-v4); Cross-arch model |
+| T-INT-007 | Integration | Network failure handling | Fetch blob with network unavailable | Graceful error, suggests manual download | Crash → poor UX; Indefinite hang → worse UX | Intermittent network; DNS failure; Proxy required but not configured |
+| T-INT-008 | Integration | Permission handling | Non-root user without emu group | Appropriate permission error, suggests sudo or group membership | Silent failure → confusing; Crash → poor UX | User in emu group → allowed; Root → allowed; Regular user → denied with guidance |
+
+### 12.13 Error Handling & Edge Case Tests
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-ERR-001 | Error Handling | Unknown blob ID | Non-existent blob ID | Clear error: "Unknown blob ID: <id>. Use `emu blob list` to see available blobs." | Generic error → poor UX; Crash → bug | ID with special characters; ID that looks like a file path; Empty ID |
+| T-ERR-002 | Error Handling | No subcommand | `emu blob` with no arguments | Shows usage/help for blob subcommand | Silent → confusing; Crash → bug | Just `emu blob`; `emu blob --help` |
+| T-ERR-003 | Error Handling | Invalid option combination | `--installed --missing` (conflicting) | Error: "Cannot combine --installed and --missing flags" | Silent ignores one → misleading; Crash → bug | `--all --arch` (valid); `--force` without blob ID |
+| T-ERR-004 | Error Handling | Disk full during download | Download to full filesystem | Error: "No space left on device. Free space: X bytes, needed: Y bytes." | Silent failure → corrupted cache; Crash → bug | Partial download then full; Download exactly fills remaining space |
+| T-ERR-005 | Error Handling | Permission denied on cache | Cache directory with wrong ownership | Error: "Permission denied: <path>. Try: sudo emu blob fetch <id>" | Silent failure → confusing; Wrong fix suggestion → unhelpful | File owned by root, user is non-root; File with immutable flag |
+| T-ERR-006 | Error Handling | Interrupted download (SIGINT) | Ctrl+C during download | Cleanly terminates, removes partial download | Leaves partial file → corrupted cache; Doesn't clean up → wasted space | Interrupt during checksum verification; Interrupt during archive extraction |
+| T-ERR-007 | Error Handling | Corrupted manifest file | Manually corrupted blobs.json | Error: "Manifest corrupted. Run `emu blob update` to restore." | Silent corruption → wrong URLs/checksums; Crash → bug | JSON parse error; Missing blob entries; Wrong checksum format |
+| T-ERR-008 | Error Handling | Unsupported architecture | `--arch mips` | Error: "Unsupported architecture: mips. Supported: amd64, i386, arm64, arm, powerpc, riscv" | Silent → confusing; Crash → bug | Arch with no blobs defined; Arch name with different case |
+
+### 12.14 Performance & Stress Tests
+
+| Test ID | Category | Description | Input | Expected Behavior | Failure Modes | Edge Cases |
+|---------|----------|-------------|-------|-------------------|---------------|------------|
+| T-PRF-001 | Performance | Download large blob | 500MB+ blob | Download completes within reasonable time, progress bar updates smoothly | Timeout → failure; Memory exhaustion → crash | Very slow network; Very fast network |
+| T-PRF-002 | Performance | List with many blobs | 100+ blobs in manifest | List displays within 1 second | Slow rendering → poor UX; Memory exhaustion → crash | All installed; All missing; Mix |
+| T-PRF-003 | Performance | Verify many blobs | 50+ installed blobs | Verification completes within reasonable time | Slow checksumming → poor UX; I/O bottleneck → slow | All on HDD; All on SSD; Mix of fast/slow storage |
+| T-PRF-004 | Performance | Concurrent operations | 10 simultaneous blob fetches | All complete, no race conditions, no corrupted files | Network congestion → timeouts; File locking issues → corruption | All different blobs; Same blob 10 times; Mix of fetch/verify/remove |
+| T-PRF-005 | Performance | Cache with many files | 1000+ files in cache directory | List and verify operations complete quickly | Slow directory traversal → poor UX; Filesystem limits reached → errors | Deep directory structure; Files with long names |
+
+---
+
+## 13. Cross-References
+
+### 13.1 Related Plan Documents
 
 | Document | Relationship |
 |----------|-------------|
