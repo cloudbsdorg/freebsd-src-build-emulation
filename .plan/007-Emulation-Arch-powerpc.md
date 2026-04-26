@@ -200,7 +200,7 @@ PowerPC uses fixed 32-bit instruction encoding:
 | PPC.13 | Implement floating-point instructions (P1) | NOT STARTED | | PPC.2 | `sys/emulation/powerpc/emu_cpu_ppc.c` | FADD, FSUB, FMUL, FDIV, FSQRT, FCMPU, FCTIWZ, FRSP, FMADD |
 | PPC.14 | Implement AltiVec/VMX instructions (P1) | NOT STARTED | | PPC.13 | `sys/emulation/powerpc/emu_cpu_ppc.c` | VADDUWM, VSUBUWM, VMUL, VPERM, VSEL, LVX, STVX |
 | PPC.15 | Implement VSX instructions (P2) | NOT STARTED | | PPC.14 | `sys/emulation/powerpc/emu_cpu_ppc.c` | XSADDDP, XVADDDP, LXVD2X, STXVD2X (POWER8+) |
-| PPC.16 | Implement U-Boot firmware loading (P0) | NOT STARTED | | PPC.1 | `usr.sbin/emu/emu_arch_ppc.c` | Load U-Boot binary. Generate device tree. |
+| PPC.16 | Implement U-Boot firmware loading (P0) | NOT STARTED | | PPC.1 | `usr.sbin/emu/emu_arch_ppc.c` | Load U-Boot binary from blob cache via `emu_blob_resolve()`. Generate device tree. See `010-Emulation-Blob-Management.md`. |
 | PPC.17 | Write PowerPC CPU emulation unit tests | NOT STARTED | | PPC.1-PPC.16 | `tests/sys/emulation/powerpc/` | Test integer ops. Test load/store. Test branches. Test MMU. Test exceptions. Test FPU. |
 | PPC.18 | Write PowerPC boot integration test | NOT STARTED | | PPC.16 | `tests/usr.sbin/emu/ppc_boot_test.sh` | Boot FreeBSD powerpc kernel in emulator. |
 

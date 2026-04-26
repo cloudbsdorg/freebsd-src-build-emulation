@@ -310,7 +310,7 @@ Same as amd64 (see `003-Emulation-Arch-amd64.md` Section 5.4):
 | I386.10 | Implement SYSENTER/SYSEXIT (i386 syscall mechanism) | NOT STARTED | | I386.1 | `sys/emulation/i386/emu_cpu_i386.c` | MSR_SYSENTER_CS/EIP/ESP. Fast system call for 32-bit. |
 | I386.11 | Implement INT 0x80 (legacy syscall) | NOT STARTED | | I386.8 | `sys/emulation/i386/emu_cpu_i386.c` | Traditional FreeBSD i386 syscall mechanism |
 | I386.12 | Implement protected mode initialization | NOT STARTED | | I386.1 | `usr.sbin/emu/emu_arch_i386.c` | GDT setup, CR0.PE=1, far jump, segment reload |
-| I386.13 | Implement SeaBIOS firmware loading (32-bit) | NOT STARTED | | I386.12 | `usr.sbin/emu/emu_arch_i386.c` | Load SeaBIOS binary. Legacy BIOS boot for i386. |
+| I386.13 | Implement SeaBIOS firmware loading (32-bit) | NOT STARTED | | I386.12 | `usr.sbin/emu/emu_arch_i386.c` | Load SeaBIOS binary from blob cache via `emu_blob_resolve()`. Legacy BIOS boot for i386. See `010-Emulation-Blob-Management.md`. |
 | I386.14 | Write i386 CPU emulation unit tests | NOT STARTED | | I386.1-I386.13 | `tests/sys/emulation/i386/` | Test 32-specific instructions. Test 2-level and PAE paging. Test hardware task switching. |
 | I386.15 | Write i386 boot integration test | NOT STARTED | | I386.13 | `tests/usr.sbin/emu/i386_boot_test.sh` | Boot FreeBSD i386 kernel in emulator. |
 

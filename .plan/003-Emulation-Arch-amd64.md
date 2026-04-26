@@ -472,7 +472,7 @@ The x86 CPU starts in real mode after reset:
 | AMD64.23 | Implement real mode initialization (P0) | NOT STARTED | | AMD64.1 | `usr.sbin/emu/emu_arch_amd64.c` | Real mode CPU state, 20-bit address space, IVT at 0x0000 |
 | AMD64.24 | Implement protected mode transition (P0) | NOT STARTED | | AMD64.23 | `usr.sbin/emu/emu_arch_amd64.c` | CR0.PE=1, GDT setup, far jump to flush prefetch |
 | AMD64.25 | Implement long mode transition (P0) | NOT STARTED | | AMD64.24 | `usr.sbin/emu/emu_arch_amd64.c` | EFER.LME=1, CR4.PAE=1, CR3=PM4L, CR0.PG=1, EFER.LMA active |
-| AMD64.26 | Implement SeaBIOS/OVMF firmware loading (P0) | NOT STARTED | | AMD64.23 | `usr.sbin/emu/emu_arch_amd64.c` | Load firmware binary at reset vector. Support legacy BIOS and UEFI. |
+| AMD64.26 | Implement SeaBIOS/OVMF firmware loading (P0) | NOT STARTED | | AMD64.23 | `usr.sbin/emu/emu_arch_amd64.c` | Load firmware binary from blob cache via `emu_blob_resolve()`. Support legacy BIOS (seabios) and UEFI (ovmf-x64). See `010-Emulation-Blob-Management.md`. |
 | AMD64.27 | Implement x87 FPU emulation (P1) | NOT STARTED | | AMD64.4 | `sys/emulation/amd64/emu_cpu_amd64.c` | ST0-ST7, FPU control/status, FINIT, FLD, FST, FADD, FSUB, FMUL, FDIV, FCOM, FSQRT |
 | AMD64.28 | Implement SSE/SSE2 emulation (P1) | NOT STARTED | | AMD64.27 | `sys/emulation/amd64/emu_cpu_amd64.c` | XMM registers, scalar and packed operations, MOVAPS, ADDPS, CVTSI2SS, etc. |
 | AMD64.29 | Implement bit manipulation instructions (P1) | NOT STARTED | | AMD64.6 | `sys/emulation/amd64/emu_cpu_amd64.c` | BT, BTS, BTR, BTC, BSF, BSR, POPCNT, LZCNT |
@@ -497,6 +497,7 @@ The x86 CPU starts in real mode after reset:
 | `001-Emulation-Overview.md` | Main implementation plan. Sections 4.3 (Kernel Module Architecture), Phase 3 (Architecture-Specific CPU Emulation), Phase 5 (Custom Emulator Engine). |
 | `002-Emulation-Security-FS.md` | Security architecture. Section 3.5 (Kernel Module Security), Section 6.5 (Capsicum Sandboxing). |
 | `004-Emulation-Arch-i386.md` | i386 (32-bit x86) architecture. Shares instruction decoder, MMU, and interrupt infrastructure. |
+| `010-Emulation-Blob-Management.md` | Blob management and CPU model database. Firmware loading (SeaBIOS, OVMF). |
 
 ### 7.2 Reference Materials
 
@@ -569,4 +570,4 @@ struct emu_config {
 - Start with interpretive emulation (no JIT). Add JIT compilation as a future enhancement.
 - The i386 (32-bit) architecture shares significant infrastructure with amd64. See `004-Emulation-Arch-i386.md` for i386-specific details.
 - For the bhyve path, CPU level is less relevant since the real hardware determines available features. The CPU level field primarily affects the custom emulator path.
-- SeaBIOS and OVMF are well-tested, BSD-licensed firmware options that can be integrated as pre-built binaries.
+- SeaBIOS and OVMF are well-tested, BSD-licensed firmware options. They are **not** included in the FreeBSD source tree or release; they are downloaded at runtime via `emu blob fetch`. See `010-Emulation-Blob-Management.md` for the complete blob management system.

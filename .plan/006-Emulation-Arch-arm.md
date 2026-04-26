@@ -221,7 +221,7 @@ Same GIC architecture as arm64 (see `005-Emulation-Arch-arm64.md` Section 4.4), 
 | ARM.13 | Implement exception handling (P0) | NOT STARTED | | ARM.10 | `sys/emulation/arm/emu_intr_arm.c` | Vector table at 0x00000000 or 0xFFFF0000. Mode switching. Banked registers. |
 | ARM.14 | Implement GICv2 interrupt controller (P0) | NOT STARTED | | ARM.13 | `sys/emulation/arm/emu_intr_arm.c` | Distributor and CPU interface. SGI, PPI, SPI. |
 | ARM.15 | Implement PL011 UART (P0) | NOT STARTED | | | `usr.sbin/emu/emu_dev_uart.c` | Shared with arm64. ARM PrimeCell UART. |
-| ARM.16 | Implement U-Boot firmware loading (P0) | NOT STARTED | | ARM.1 | `usr.sbin/emu/emu_arch_arm.c` | Load U-Boot binary. Generate DTB. |
+| ARM.16 | Implement U-Boot firmware loading (P0) | NOT STARTED | | ARM.1 | `usr.sbin/emu/emu_arch_arm.c` | Load U-Boot binary from blob cache via `emu_blob_resolve()`. Generate DTB. See `010-Emulation-Blob-Management.md`. |
 | ARM.17 | Implement device tree generation (P0) | NOT STARTED | | ARM.16 | `usr.sbin/emu/emu_arch_arm.c` | Generate FDT for ARMv7 platform. |
 | ARM.18 | Implement NEON/VFP instructions (P1) | NOT STARTED | | ARM.4 | `sys/emulation/arm/emu_cpu_arm.c` | VADD, VMUL, VLD1, VST1, FADD, FMUL, etc. |
 | ARM.19 | Write ARM CPU emulation unit tests | NOT STARTED | | ARM.1-ARM.18 | `tests/sys/emulation/arm/` | Test ARM and Thumb decoders. Test data processing. Test load/store. Test branch conditions. Test MMU. Test exception handling. Test GIC. |

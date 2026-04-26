@@ -421,7 +421,7 @@ Each exception level has its own vector table, pointed to by `VBAR_ELx`. The tab
 | ARM64.20 | Implement GICv3 CPU interface (P0) | NOT STARTED | | ARM64.19 | `sys/emulation/arm64/emu_intr_arm64.c` | IAR, EOI, PMR, BPR. Interrupt acknowledge and completion. |
 | ARM64.21 | Implement generic timer (P0) | NOT STARTED | | ARM64.16 | `sys/emulation/arm64/emu_intr_arm64.c` | CNTPCT, CNTFRQ, CNTP_TVAL, CNTP_CTL, CNTP_CVAL. Timer interrupt to GIC. |
 | ARM64.22 | Implement PL011 UART (P0) | NOT STARTED | | | `usr.sbin/emu/emu_dev_uart.c` | ARM PrimeCell UART at 0x9000000. Console output. |
-| ARM64.23 | Implement U-Boot firmware loading (P0) | NOT STARTED | | ARM64.1 | `usr.sbin/emu/emu_arch_arm64.c` | Load U-Boot binary. Generate DTB for emulated platform. |
+| ARM64.23 | Implement U-Boot firmware loading (P0) | NOT STARTED | | ARM64.1 | `usr.sbin/emu/emu_arch_arm64.c` | Load U-Boot binary from blob cache via `emu_blob_resolve()`. Generate DTB for emulated platform. See `010-Emulation-Blob-Management.md`. |
 | ARM64.24 | Implement device tree generation (P0) | NOT STARTED | | ARM64.23 | `usr.sbin/emu/emu_arch_arm64.c` | Generate FDT blob describing CPU, GIC, UART, timer, virtio devices. |
 | ARM64.25 | Implement scalar floating-point (P1) | NOT STARTED | | ARM64.3 | `sys/emulation/arm64/emu_cpu_arm64.c` | FADD, FSUB, FMUL, FDIV, FSQRT, FCVT, FCMP, FMOV |
 | ARM64.26 | Implement Advanced SIMD (NEON) (P1) | NOT STARTED | | ARM64.25 | `sys/emulation/arm64/emu_cpu_arm64.c` | LD1/ST1, ADD, MUL, FADD, CMEQ, AND, ORR, DUP, MOVI, ZIP, etc. |
@@ -480,5 +480,5 @@ Each exception level has its own vector table, pointed to by `VBAR_ELx`. The tab
 - AArch64 uses fixed 32-bit instruction encoding, making the decoder significantly simpler than x86-64's variable-length encoding.
 - The GICv3 is the most complex component to emulate. Start with a simplified GICv2-compatible mode if GICv3 proves too complex initially.
 - FreeBSD arm64 requires a device tree blob (DTB) to describe the platform. The emulator must generate a valid DTB at boot time.
-- U-Boot is the recommended boot firmware. It supports loading ELF kernels directly via the `booti` command.
+- U-Boot is the recommended boot firmware. It supports loading ELF kernels directly via the `booti` command. U-Boot is **not** included in the FreeBSD source tree or release; it is downloaded at runtime via `emu blob fetch uboot-arm64`. See `010-Emulation-Blob-Management.md` for the complete blob management system.
 - The AArch32 compatibility mode (running 32-bit ARM code at EL0) is not required for FreeBSD arm64 kernel testing but may be needed for userspace compatibility testing.

@@ -735,16 +735,17 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | **Architectures** | amd64, i386 |
 
 **Emulation approach:**
-- Include SeaBIOS binary as a pre-built blob
+- Load SeaBIOS binary from blob cache via `emu_blob_resolve("seabios", "seabios.bin", ...)`
 - Load at 0x000F0000 (with alias at 0xFFFF0000)
 - SeaBIOS handles: INT 0x13 (disk), INT 0x10 (video), INT 0x15 (E820 memory map), INT 0x16 (keyboard), INT 0x1A (RTC)
 - Provide SMBIOS tables for system identification
 - Provide PIRQ routing table for PCI interrupts
 
 **Integration:**
-- SeaBIOS is BSD-licensed and can be included in the FreeBSD tree
-- Build as part of the emulator build process
-- Alternatively, load from a file at runtime
+- SeaBIOS is BSD-licensed (LGPLv3 combined binary)
+- **Not** included in the FreeBSD source tree or release
+- Downloaded at runtime via `emu blob fetch seabios`
+- See `010-Emulation-Blob-Management.md` for full blob management details
 
 **Implementation:** `usr.sbin/emu/emu_firmware.c`
 
@@ -758,7 +759,7 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | **Architectures** | amd64, i386, arm64 |
 
 **Emulation approach:**
-- Include OVMF binary (TianoCore EDK2) as a pre-built blob
+- Load OVMF binary from blob cache via `emu_blob_resolve("ovmf-x64", "OVMF_CODE.fd", ...)`
 - Load at the flash base address
 - OVMF handles: UEFI boot services, GPT partition table, EFI system partition
 - Provide UEFI runtime services (get time, set time, reset system)
@@ -766,8 +767,10 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 
 **Integration:**
 - OVMF is BSD-licensed
-- Build for each target architecture (IA32, X64, AARCH64)
+- **Not** included in the FreeBSD source tree or release
+- Downloaded at runtime via `emu blob fetch ovmf-x64` (or `ovmf-ia32`, `ovmf-aarch64`)
 - Support both OVMF_CODE.fd (code) and OVMF_VARS.fd (variables)
+- See `010-Emulation-Blob-Management.md` for full blob management details
 
 **Implementation:** `usr.sbin/emu/emu_firmware.c`
 
@@ -780,15 +783,18 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | **Architectures** | arm64, arm, powerpc, riscv |
 
 **Emulation approach:**
-- Include U-Boot binary as a pre-built blob
+- Load U-Boot binary from blob cache via `emu_blob_resolve("uboot-<arch>", "u-boot.bin", ...)`
 - Load at the architecture-specific entry point
 - U-Boot handles: device tree loading, kernel loading (booti/bootm), network boot (TFTP)
 - Provide U-Boot environment variables for boot configuration
 
 **Integration:**
-- U-Boot is BSD-licensed (GPLv2, but can be distributed as a binary blob)
+- U-Boot is GPLv2 licensed
+- **Not** included in the FreeBSD source tree or release
+- Downloaded at runtime via `emu blob fetch uboot-<arch>`
 - Build for each target architecture and board
 - Use a generic "virt" board configuration
+- See `010-Emulation-Blob-Management.md` for full blob management details
 
 **Implementation:** `usr.sbin/emu/emu_firmware.c`
 
@@ -802,15 +808,18 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 | **Architectures** | riscv |
 
 **Emulation approach:**
-- Include OpenSBI binary as a pre-built blob
-- Load at the reset vector address
+- Load OpenSBI binary from blob cache via `emu_blob_resolve("opensbi", "fw_jump.bin", ...)`
+- Load at the reset vector address (0x80000000)
 - OpenSBI provides: SBI (Supervisor Binary Interface) services
 - SBI services: timer, IPI, console, system reset
 
 **Integration:**
 - OpenSBI is BSD-licensed
+- **Not** included in the FreeBSD source tree or release
+- Downloaded at runtime via `emu blob fetch opensbi`
 - Build for RISC-V 64-bit
 - Configure for the emulated platform (number of harts, timer frequency)
+- See `010-Emulation-Blob-Management.md` for full blob management details
 
 **Implementation:** `usr.sbin/emu/emu_firmware.c`
 
@@ -893,7 +902,7 @@ Simplified version of GICv3 without redistributors and LPIs. CPU interface is at
 
 - **Start simple**: Begin with NS16550 UART, virtio-blk, and the arch-specific interrupt controller. These are sufficient to boot FreeBSD.
 - **Add complexity later**: HPET, ACPI, AHCI, and network can be added after basic boot works.
-- **Firmware as blobs**: SeaBIOS, OVMF, U-Boot, and OpenSBI are pre-built binaries. Include them in the FreeBSD tree or download at build time.
+- **Firmware as blobs**: SeaBIOS, OVMF, U-Boot, and OpenSBI are pre-built binaries. **Never** included in the FreeBSD source tree or release. Downloaded at runtime via `emu blob fetch <blob-id>`. See `010-Emulation-Blob-Management.md` for the complete blob management system.
 - **Device tree generation**: For ARM and RISC-V, the device tree blob (DTB) must describe all emulated devices and their MMIO addresses.
 - **ACPI generation**: For x86, ACPI tables must be generated dynamically based on instance configuration (number of CPUs, memory size, etc.).
 - **Interrupt routing**: Each device's interrupt must be correctly routed to the arch-specific interrupt controller. Document the IRQ assignments clearly.

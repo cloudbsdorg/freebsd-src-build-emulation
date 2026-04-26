@@ -13,7 +13,7 @@ This document outlines a comprehensive, incremental approach to adding a kernel 
 
 **Architecture-Specific Emulation Details:** See the per-architecture plan files (`003-Emulation-Arch-amd64.md` through `008-Emulation-Arch-riscv.md`) for detailed instruction set specifications, register state, MMU formats, interrupt models, boot processes, CPU levels, and implementation task tables for each target architecture.
 
-**Blob (Firmware) Management:** See `010-Emulation-Blob-Management.md` for the blob management system — how firmware blobs (SeaBIOS, OVMF, U-Boot, OpenSBI, DTB) are downloaded, verified, cached, and loaded. Blobs are never packaged in the FreeBSD kernel or release; they are fetched at runtime via the `emu blob` subcommand.
+**Blob (Firmware) Management & CPU Models:** See `010-Emulation-Blob-Management.md` for the blob management system — how firmware blobs (SeaBIOS, OVMF, U-Boot, OpenSBI, DTB) are downloaded, verified, cached, and loaded. Blobs are never packaged in the FreeBSD kernel or release; they are fetched at runtime via the `emu blob` subcommand. The same document also defines the **predefined CPU model database** (`cpu_models.json`) with 30+ CPU models across all architectures, selectable via `--cpu-level`.
 
 ---
 

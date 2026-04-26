@@ -335,8 +335,8 @@ Same as Sv39 but with 4 levels and 48-bit virtual address:
 | RISCV.15 | Implement PLIC (P0) | NOT STARTED | | RISCV.13 | `sys/emulation/riscv/emu_intr_riscv.c` | MMIO at 0x0C000000. Priority, pending, enable, threshold, claim/complete. |
 | RISCV.16 | Implement floating-point extension (F/D ext, P1) | NOT STARTED | | RISCV.3 | `sys/emulation/riscv/emu_cpu_riscv.c` | FLW, FSW, FLD, FSD, FADD, FSUB, FMUL, FDIV, FSQRT, FCVT, FCMP, FCLASS |
 | RISCV.17 | Implement vector extension (V ext, P2) | NOT STARTED | | RISCV.16 | `sys/emulation/riscv/emu_cpu_riscv.c` | VADD, VSUB, VMUL, VLE, VSE, VFADD, VFMADD, etc. |
-| RISCV.18 | Implement OpenSBI firmware loading (P0) | NOT STARTED | | RISCV.1 | `usr.sbin/emu/emu_arch_riscv.c` | Load OpenSBI binary at M-mode reset vector. Provide SBI services. |
-| RISCV.19 | Implement U-Boot firmware loading (P0) | NOT STARTED | | RISCV.18 | `usr.sbin/emu/emu_arch_riscv.c` | Load U-Boot binary. Generate DTB. |
+| RISCV.18 | Implement OpenSBI firmware loading (P0) | NOT STARTED | | RISCV.1 | `usr.sbin/emu/emu_arch_riscv.c` | Load OpenSBI binary from blob cache via `emu_blob_resolve()`. M-mode reset vector. Provide SBI services. See `010-Emulation-Blob-Management.md`. |
+| RISCV.19 | Implement U-Boot firmware loading (P0) | NOT STARTED | | RISCV.18 | `usr.sbin/emu/emu_arch_riscv.c` | Load U-Boot binary from blob cache via `emu_blob_resolve()`. Generate DTB. See `010-Emulation-Blob-Management.md`. |
 | RISCV.20 | Implement device tree generation (P0) | NOT STARTED | | RISCV.19 | `usr.sbin/emu/emu_arch_riscv.c` | Generate FDT for RISC-V platform. CPU, CLINT, PLIC, UART, virtio. |
 | RISCV.21 | Write RISC-V CPU emulation unit tests | NOT STARTED | | RISCV.1-RISCV.20 | `tests/sys/emulation/riscv/` | Test integer ops. Test compressed instructions. Test load/store. Test branches. Test atomics. Test MMU. Test traps. Test CLINT/PLIC. Test FPU. |
 | RISCV.22 | Write RISC-V boot integration test | NOT STARTED | | RISCV.19 | `tests/usr.sbin/emu/riscv_boot_test.sh` | Boot FreeBSD riscv64 kernel in emulator. Verify console output. |
