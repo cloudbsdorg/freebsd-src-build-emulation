@@ -29,6 +29,13 @@
 
 #include <sys/types.h>
 #include <sys/cdefs.h>
+#include <sys/param.h>
+#include <sysexits.h>
+
+/* Extended exit codes (not in standard sysexits.h) */
+#ifndef EX_EXISTS
+#define	EX_EXISTS	80	/* instance already exists */
+#endif
 
 /*
  * Emulation Framework Userland Tool
@@ -78,6 +85,16 @@ enum emu_output_format {
 	EMU_OUTPUT_JUNIT
 };
 
+/* Maximum number of share mounts per instance */
+#define	EMU_MAX_SHARES	8
+
+/* Share mount configuration */
+struct emu_share_config {
+	char		host_path[EMU_PATH_MAX];
+	char		guest_path[EMU_PATH_MAX];
+	int		read_only;
+};
+
 /* Instance configuration */
 struct emu_instance_config {
 	char		name[EMU_NAME_MAX];
@@ -90,6 +107,8 @@ struct emu_instance_config {
 	char		image_path[EMU_PATH_MAX];
 	char		kernel_path[EMU_PATH_MAX];
 	char		blob_path[EMU_PATH_MAX];
+	struct emu_share_config	shares[EMU_MAX_SHARES];
+	int		num_shares;
 };
 
 /* Instance state */
@@ -136,6 +155,9 @@ int	emu_cmd_list(int argc, char *argv[]);
 int	emu_cmd_snapshot(int argc, char *argv[]);
 int	emu_cmd_restore(int argc, char *argv[]);
 int	emu_cmd_blob(int argc, char *argv[]);
+
+/* Share path validation */
+int	emu_validate_share_path(const char *path, char *resolved_path, size_t resolved_len);
 
 /* Utility functions */
 extern int		g_verbose;
