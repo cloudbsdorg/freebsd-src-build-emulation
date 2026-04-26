@@ -387,7 +387,7 @@ This JSON file contains the full specification for each CPU model, including:
 
 ## 4. Blob Cache Directory Structure
 
-### 3.1 Directory Layout
+### 4.1 Directory Layout
 
 ```
 /var/emu/blobs/                          # System-wide blob cache (root)
@@ -434,7 +434,7 @@ This JSON file contains the full specification for each CPU model, including:
   └── (same structure as above)
 ```
 
-### 3.2 Cache Resolution Order
+### 4.2 Cache Resolution Order
 
 When the emulator needs a blob, it searches in this order:
 
@@ -451,11 +451,11 @@ If the blob is not found in any location, the emulator reports a clear error mes
 
 ---
 
-## 4. Blob Manifest Format
+## 5. Blob Manifest Format
 
 The blob manifest (`blobs.json`) is a JSON file that describes all known blobs. It is shipped with the emulator source code and installed to the blob cache.
 
-### 4.1 Manifest Schema
+### 5.1 Manifest Schema
 
 ```json
 {
@@ -583,7 +583,7 @@ The blob manifest (`blobs.json`) is a JSON file that describes all known blobs. 
 }
 ```
 
-### 4.2 Manifest Location
+### 5.2 Manifest Location
 
 The manifest is shipped with the emulator source at:
 
@@ -595,9 +595,9 @@ When `emu blob` commands run, they read this manifest to know where to download 
 
 ---
 
-## 5. `emu blob` Subcommand Design
+## 6. `emu blob` Subcommand Design
 
-### 5.1 Command Interface
+### 6.1 Command Interface
 
 ```
 emu blob [command] [options]
@@ -614,7 +614,7 @@ Commands:
   update    Update blob manifest from upstream
 ```
 
-### 5.2 Command Details
+### 6.2 Command Details
 
 #### `emu blob fetch`
 
@@ -807,7 +807,7 @@ Examples:
 - Merges with local manifest (preserving local overrides)
 - Reports new blobs, updated versions, and removed blobs
 
-### 5.3 Exit Codes
+### 6.3 Exit Codes
 
 | Exit Code | Meaning |
 |-----------|---------|
@@ -821,9 +821,9 @@ Examples:
 
 ---
 
-## 6. Integration with Emulator Engine
+## 7. Integration with Emulator Engine
 
-### 6.1 Firmware Loading
+### 7.1 Firmware Loading
 
 The emulator engine (`usr.sbin/emu/emu_firmware.c`) uses the blob cache to locate firmware binaries:
 
@@ -848,7 +848,7 @@ emu_firmware_load(struct emu_instance *inst, const char *blob_id)
 }
 ```
 
-### 6.2 Blob Resolution API
+### 7.2 Blob Resolution API
 
 ```c
 /* Resolve a blob file path using cache resolution order */
@@ -868,7 +868,7 @@ const char *emu_blob_get_cache_dir(void);
 void emu_blob_set_cache_dir(const char *dir);
 ```
 
-### 6.3 Integration Points
+### 7.3 Integration Points
 
 | Component | Blob Used | Integration |
 |-----------|-----------|-------------|
@@ -881,9 +881,9 @@ void emu_blob_set_cache_dir(const char *dir);
 
 ---
 
-## 7. Build System Integration
+## 8. Build System Integration
 
-### 7.1 Make Targets
+### 8.1 Make Targets
 
 The emulator's build system provides optional targets for blob management:
 
@@ -915,7 +915,7 @@ make blobs-build    # Build DTB blobs
 make buildworld     # Normal build — no blobs fetched
 ```
 
-### 7.2 Build-Time Blob Directory
+### 8.2 Build-Time Blob Directory
 
 If `make blobs` is run during build, blobs are placed in:
 
@@ -925,7 +925,7 @@ ${SRCTOP}/usr.sbin/emu/blobs/
 
 This directory is **not** committed to the source tree (added to `.gitignore`). It serves as a build-time cache so developers don't need to download blobs separately.
 
-### 7.3 Release Integration
+### 8.3 Release Integration
 
 Blobs are **never** included in FreeBSD release artifacts:
 
@@ -941,7 +941,7 @@ The release build process explicitly excludes the blob cache:
 NO_BLOBS=1
 ```
 
-### 7.4 Package Integration (Future)
+### 8.4 Package Integration (Future)
 
 If the emulator is packaged (e.g., via pkg(8)), blobs could be provided as separate packages:
 
@@ -960,9 +960,9 @@ This is a future enhancement and not part of the initial implementation.
 
 ---
 
-## 8. User Guidance
+## 9. User Guidance
 
-### 8.1 Error Messages
+### 9.1 Error Messages
 
 When a blob is missing, the emulator prints a clear, actionable error message:
 
@@ -988,7 +988,7 @@ ERROR: Required firmware blob not found: seabios
     emu blob info seabios
 ```
 
-### 8.2 First-Run Experience
+### 9.2 First-Run Experience
 
 When a user runs `emu start` for the first time without blobs:
 
@@ -1008,7 +1008,7 @@ ERROR: Required firmware blob not found: seabios
     emu blob info ovmf-x64
 ```
 
-### 8.3 Documentation
+### 9.3 Documentation
 
 Each blob's documentation includes:
 
@@ -1021,9 +1021,9 @@ Each blob's documentation includes:
 
 ---
 
-## 9. Security Considerations
+## 10. Security Considerations
 
-### 9.1 Blob Integrity
+### 10.1 Blob Integrity
 
 | Threat | Mitigation |
 |--------|------------|
@@ -1032,7 +1032,7 @@ Each blob's documentation includes:
 | Stale/outdated blob | Version tracking in manifest, `--outdated` flag |
 | Malicious blob substitution | Checksums signed with the emulator's release key (future) |
 
-### 9.2 Blob Execution
+### 10.2 Blob Execution
 
 Firmware blobs are executed in the emulated environment, not on the host:
 
@@ -1041,14 +1041,14 @@ Firmware blobs are executed in the emulated environment, not on the host:
 - Blobs cannot access host filesystem, network, or processes
 - Blobs are subject to the same Capsicum sandboxing as the rest of the emulator
 
-### 9.3 Cache Permissions
+### 10.3 Cache Permissions
 
 | Cache Location | Permissions | Owner |
 |----------------|-------------|-------|
 | `/var/emu/blobs/` | `0755` directories, `0644` files | `root:emu` |
 | `~/.cache/emu/blobs/` | `0700` directories, `0600` files | User |
 
-### 9.4 Supply Chain Security
+### 10.4 Supply Chain Security
 
 - All blob URLs point to official upstream releases or well-known mirrors
 - SHA-256 checksums are verified after every download
@@ -1057,7 +1057,7 @@ Firmware blobs are executed in the emulated environment, not on the host:
 
 ---
 
-## 10. Implementation Tasks
+## 11. Implementation Tasks
 
 | # | Task | Status | Assigned To | Dependencies | Files | Notes |
 |---|------|--------|-------------|--------------|-------|-------|
@@ -1089,9 +1089,9 @@ Firmware blobs are executed in the emulated environment, not on the host:
 
 ---
 
-## 11. Cross-References
+## 12. Cross-References
 
-### 11.1 Related Plan Documents
+### 12.1 Related Plan Documents
 
 | Document | Relationship |
 |----------|-------------|
@@ -1105,7 +1105,7 @@ Firmware blobs are executed in the emulated environment, not on the host:
 | `008-Emulation-Arch-riscv.md` | RISC-V firmware requirements (OpenSBI, U-Boot, DTB). Tasks RISCV.18, RISCV.19, RISCV.20. |
 | `009-Emulation-Devices.md` | Device emulation. Firmware devices section (Section 8). Tasks DEV.22-DEV.25. |
 
-### 11.2 Reference Materials
+### 12.2 Reference Materials
 
 | Resource | URL / Path | Use |
 |----------|------------|-----|
@@ -1116,7 +1116,7 @@ Firmware blobs are executed in the emulated environment, not on the host:
 | Device Tree Specification | https://www.devicetree.org/ | DTS/DTB format |
 | `dtc` (Device Tree Compiler) | https://git.kernel.org/pub/scm/utils/dtc/dtc.git | DTS → DTB compilation |
 
-### 11.3 Shared Infrastructure
+### 12.3 Shared Infrastructure
 
 | Component | Shared With | Location |
 |-----------|-------------|----------|
@@ -1128,7 +1128,7 @@ Firmware blobs are executed in the emulated environment, not on the host:
 
 ---
 
-## 12. Task Completion Checklist
+## 13. Task Completion Checklist
 
 > **Note for agents:** When picking up a task, fill in the **Assigned To** column with your agent name/ID. When completing a task, update the **Status** column to `COMPLETED` and add your name/ID to the **Assigned To** column if not already filled. This ensures traceability across sessions.
 
@@ -1156,7 +1156,7 @@ Firmware blobs are executed in the emulated environment, not on the host:
 
 ---
 
-## 13. Future Enhancements
+## 14. Future Enhancements
 
 1. **GPG-signed manifests**: Sign `blobs.json` with the emulator's release key for additional supply chain security
 2. **Package-based blobs**: Provide blobs as FreeBSD packages (`pkg install emu-blobs-seabios`)
@@ -1171,7 +1171,7 @@ Firmware blobs are executed in the emulated environment, not on the host:
 
 ---
 
-## 14. Conclusion
+## 15. Conclusion
 
 The blob management system provides a clean separation between the emulator framework and the firmware blobs it needs to operate:
 
