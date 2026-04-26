@@ -72,6 +72,13 @@ static int cmd_destroy(int argc, char *argv[]);
 static int cmd_console(int argc, char *argv[]);
 static int cmd_help(int argc, char *argv[]);
 static int cmd_version(int argc, char *argv[]);
+static int cmd_load(int argc, char *argv[]);
+static int cmd_unload(int argc, char *argv[]);
+static int cmd_stack(int argc, char *argv[]);
+static int cmd_test(int argc, char *argv[]);
+static int cmd_snapshot(int argc, char *argv[]);
+static int cmd_restore(int argc, char *argv[]);
+static int cmd_blob(int argc, char *argv[]);
 
 /* Available commands */
 static struct emu_command commands[] = {
@@ -82,6 +89,13 @@ static struct emu_command commands[] = {
 	{ "list", "List all emulated instances", cmd_list },
 	{ "destroy", "Destroy an emulated instance", cmd_destroy },
 	{ "console", "Display instance console output", cmd_console },
+	{ "load", "Load kernel module into instance", cmd_load },
+	{ "unload", "Unload kernel module from instance", cmd_unload },
+	{ "stack", "Examine kernel stack trace", cmd_stack },
+	{ "test", "Run tests in emulated instance", cmd_test },
+	{ "snapshot", "Create instance snapshot", cmd_snapshot },
+	{ "restore", "Restore from snapshot", cmd_restore },
+	{ "blob", "Manage firmware blobs", cmd_blob },
 	{ "help", "Show help message", cmd_help },
 	{ "version", "Show version information", cmd_version },
 	{ NULL, NULL, NULL }
@@ -147,50 +161,85 @@ cmd_version(int argc, char *argv[])
 static int
 cmd_init(int argc, char *argv[])
 {
-	warnx("emu init: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_init(argc, argv));
 }
 
 static int
 cmd_start(int argc, char *argv[])
 {
-	warnx("emu start: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_start(argc, argv));
 }
 
 static int
 cmd_stop(int argc, char *argv[])
 {
-	warnx("emu stop: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_stop(argc, argv));
 }
 
 static int
 cmd_status(int argc, char *argv[])
 {
-	warnx("emu status: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_status(argc, argv));
 }
 
 static int
 cmd_list(int argc, char *argv[])
 {
-	warnx("emu list: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_list(argc, argv));
 }
 
 static int
 cmd_destroy(int argc, char *argv[])
 {
-	warnx("emu destroy: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_destroy(argc, argv));
 }
 
 static int
 cmd_console(int argc, char *argv[])
 {
-	warnx("emu console: Not yet implemented");
-	return (EX_UNAVAILABLE);
+	return (emu_cmd_console(argc, argv));
+}
+
+static int
+cmd_load(int argc, char *argv[])
+{
+	return (emu_cmd_load(argc, argv));
+}
+
+static int
+cmd_unload(int argc, char *argv[])
+{
+	return (emu_cmd_unload(argc, argv));
+}
+
+static int
+cmd_stack(int argc, char *argv[])
+{
+	return (emu_cmd_stack(argc, argv));
+}
+
+static int
+cmd_test(int argc, char *argv[])
+{
+	return (emu_cmd_test(argc, argv));
+}
+
+static int
+cmd_snapshot(int argc, char *argv[])
+{
+	return (emu_cmd_snapshot(argc, argv));
+}
+
+static int
+cmd_restore(int argc, char *argv[])
+{
+	return (emu_cmd_restore(argc, argv));
+}
+
+static int
+cmd_blob(int argc, char *argv[])
+{
+	return (emu_cmd_blob(argc, argv));
 }
 
 int
