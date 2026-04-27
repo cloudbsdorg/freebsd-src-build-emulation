@@ -58,6 +58,21 @@
 /* Global crash detection initialized flag */
 static bool g_crash_initialized = false;
 
+/* Global crash context for signal handler */
+static struct emu_crash_context *g_crash_ctx = NULL;
+
+/*
+ * Signal handler for crash detection
+ */
+void
+emu_crash_signal_handler(int sig)
+{
+	if (g_crash_ctx != NULL && g_crash_ctx->crash != NULL) {
+		emu_crash_signal(g_crash_ctx, sig);
+		emu_crash_contain(g_crash_ctx);
+	}
+}
+
 /*
  * Convert crash type to string for debugging
  */
@@ -97,11 +112,28 @@ emu_crash_type_str(enum emu_crash_type type)
 int
 emu_crash_init(void)
 {
+	struct sigaction sa;
+
 	if (g_crash_initialized)
 		return (0);
 
-	/* Initialize crash detection subsystem */
-	/* TODO: Set up signal handlers, watchdog timers, etc. */
+	/* Set up signal handlers for crash detection */
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_flags = SA_RESETHAND;
+	sigemptyset(&sa.sa_mask);
+
+	/* Catch fatal signals */
+	sa.sa_handler = emu_crash_signal_handler;
+	if (sigaction(SIGSEGV, &sa, NULL) != 0)
+		return (-1);
+	if (sigaction(SIGBUS, &sa, NULL) != 0)
+		return (-1);
+	if (sigaction(SIGILL, &sa, NULL) != 0)
+		return (-1);
+	if (sigaction(SIGFPE, &sa, NULL) != 0)
+		return (-1);
+	if (sigaction(SIGABRT, &sa, NULL) != 0)
+		return (-1);
 
 	g_crash_initialized = true;
 	return (0);
@@ -120,7 +152,12 @@ emu_crash_enable(struct emu_crash_context *ctx)
 	/* Reset crash state */
 	emu_crash_reset(ctx->crash);
 
-	/* TODO: Set up instance-specific crash detection */
+	/* Set up instance-specific crash detection */
+	ctx->crash->enabled = true;
+	ctx->crash->cpu_id = ctx->cpu ? ctx->cpu->cpu_id : 0;
+
+	/* Set global context for signal handler */
+	g_crash_ctx = ctx;
 
 	return (0);
 }
@@ -135,7 +172,9 @@ emu_crash_disable(struct emu_crash_context *ctx)
 	if (ctx == NULL)
 		return (-1);
 
-	/* TODO: Tear down instance-specific crash detection */
+	/* Tear down instance-specific crash detection */
+	if (ctx->crash != NULL)
+		ctx->crash->enabled = false;
 
 	return (0);
 }
@@ -508,13 +547,19 @@ emu_crash_signal(struct emu_crash_context *ctx, int sig)
 int
 emu_crash_contain(struct emu_crash_context *ctx)
 {
-	if (ctx == NULL)
+	if (ctx == NULL || ctx->crash == NULL)
 		return (-1);
 
-	/* TODO: Implement crash containment */
-	/* - Isolate guest memory */
-	/* - Prevent further guest execution */
-	/* - Block guest-initiated host operations */
+	/* Mark instance as contained to prevent further operations */
+	ctx->crash->contained = true;
+
+	/* Isolate guest memory by marking it read-only */
+	if (ctx->mem != NULL)
+		emu_mem_isolate(ctx->mem);
+
+	/* Prevent further guest execution */
+	if (ctx->cpu != NULL)
+		ctx->cpu->halted = true;
 
 	emu_crash_log(ctx->crash, "Crash containment activated\n");
 
@@ -533,10 +578,20 @@ emu_crash_cleanup(struct emu_crash_context *ctx)
 
 	emu_crash_log(ctx->crash, "Cleaning up after crash\n");
 
-	/* TODO: Implement clean resource termination */
-	/* - Free allocated resources */
-	/* - Close file descriptors */
-	/* - Release memory mappings */
+	/* Free allocated resources */
+	if (ctx->crash != NULL) {
+		emu_crash_clear_log(ctx->crash);
+		ctx->crash->enabled = false;
+		ctx->crash->contained = false;
+	}
+
+	/* Release memory mappings */
+	if (ctx->mem != NULL)
+		emu_mem_cleanup(ctx->mem);
+
+	/* Clear CPU state */
+	if (ctx->cpu != NULL)
+		memset(ctx->cpu, 0, sizeof(struct emu_cpu_state));
 
 	return (0);
 }
