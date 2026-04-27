@@ -47,6 +47,7 @@
 #include <sys/limits.h>
 #include "emu.h"
 #include "emu_smp.h"
+#include "emu_audit.h"
 
 /*
  * Instance resource limits
@@ -379,6 +380,8 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 	    name, (u_long)inst->inst_id, uid, (u_long)inst->inst_memory_limit,
 	    num_vcpus, num_sockets);
 
+	AUDIT_INSTANCE_CREATE(inst->inst_name);
+
 	return (0);
 }
 
@@ -416,6 +419,8 @@ emu_instance_destroy(uint64_t inst_id)
 
 	printf("emu: destroyed instance %s (ID %lu)\n",
 	    inst->inst_name, (u_long)inst->inst_id);
+
+	AUDIT_INSTANCE_DESTROY(inst->inst_name);
 
 	/* Destroy vCPU array */
 	if (inst->inst_vcpus != NULL) {
@@ -464,6 +469,8 @@ emu_instance_start(uint64_t inst_id)
 	printf("emu: started instance %s (ID %lu)\n",
 	    inst->inst_name, (u_long)inst->inst_id);
 
+	AUDIT_INSTANCE_START(inst->inst_name);
+
 	return (0);
 }
 
@@ -499,6 +506,8 @@ emu_instance_stop(uint64_t inst_id)
 
 	printf("emu: stopped instance %s (ID %lu)\n",
 	    inst->inst_name, (u_long)inst->inst_id);
+
+	AUDIT_INSTANCE_STOP(inst->inst_name);
 
 	return (0);
 }

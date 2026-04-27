@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/jail.h>
 
 #include "emu.h"
+#include "emu_audit.h"
 
 /*
  * Emulation Framework Access Control
@@ -109,6 +110,7 @@ emu_check_access(struct thread *td, uint64_t inst_id, int perm)
 	/* Check if non-root access is allowed */
 	if (!emu_allow_nonroot) {
 		/* Non-root access denied */
+		AUDIT_PERM_DENIED("instance_access", "non-root access denied by allow_nonroot");
 		return (EPERM);
 	}
 
@@ -139,6 +141,7 @@ emu_check_access(struct thread *td, uint64_t inst_id, int perm)
 	mtx_unlock(&emu_instance_lock);
 
 	/* Access denied */
+	AUDIT_PERM_DENIED("instance_access", "not owner, not in emu group, not root");
 	return (EPERM);
 }
 
@@ -161,8 +164,10 @@ emu_check_create(struct thread *td)
 		return (0);
 
 	/* Check if non-root access is allowed */
-	if (!emu_allow_nonroot)
+	if (!emu_allow_nonroot) {
+		AUDIT_PERM_DENIED("instance_create", "non-root access denied by allow_nonroot");
 		return (EPERM);
+	}
 
 	/* Check for PRIV_EMU_CREATE privilege */
 	if (priv_check(td, PRIV_EMU_CREATE) == 0)
@@ -176,6 +181,7 @@ emu_check_create(struct thread *td)
 	if (groupmember(GID_EMU, cred) == 0)
 		return (0);
 
+	AUDIT_PERM_DENIED("instance_create", "not root, no PRIV_EMU_CREATE, not in emu group");
 	return (EPERM);
 }
 
@@ -222,5 +228,6 @@ emu_check_destroy(struct thread *td, uint64_t inst_id)
 	}
 	mtx_unlock(&emu_instance_lock);
 
+	AUDIT_PERM_DENIED("instance_destroy", "not root, no PRIV_EMU_DESTROY, not owner");
 	return (EPERM);
 }
