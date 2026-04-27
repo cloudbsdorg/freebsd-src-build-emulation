@@ -95,6 +95,20 @@ struct emu_share_config {
 	int		read_only;
 };
 
+/* Global configuration */
+struct emu_config {
+	enum emu_arch	arch;
+	enum emu_mode	mode;
+	char		cpu_level[32];
+	int		cpu_speed_mhz;
+	uint64_t	memory_size;
+	int		num_cpus;
+	enum emu_output_format output_format;
+	int		verbose;
+	char		instance_dir[EMU_PATH_MAX];
+	char		image_cache_dir[EMU_PATH_MAX];
+};
+
 /* Instance configuration */
 struct emu_instance_config {
 	char		name[EMU_NAME_MAX];
@@ -155,13 +169,41 @@ int	emu_cmd_list(int argc, char *argv[]);
 int	emu_cmd_snapshot(int argc, char *argv[]);
 int	emu_cmd_restore(int argc, char *argv[]);
 int	emu_cmd_blob(int argc, char *argv[]);
+int	emu_cmd_image(int argc, char *argv[]);
 
 /* Share path validation */
 int	emu_validate_share_path(const char *path, char *resolved_path, size_t resolved_len);
 
+/* Directory utilities */
+int	mkdirp(const char *path, mode_t mode);
+
+/* Configuration management */
+int	emu_config_load(void);
+int	emu_config_save(void);
+struct emu_config *emu_config_get(void);
+void	emu_config_set_verbose(int verbose);
+int	emu_config_get_verbose(void);
+int	emu_cmd_config(int argc, char *argv[]);
+
+/* Image management */
+int	emu_image_cached(const char *arch, const char *image_name);
+int	emu_image_download(const char *url, const char *arch, const char *image_name,
+    const char *checksum);
+int	emu_image_verify(const char *image_path, const char *expected_checksum);
+int	emu_image_install(const char *arch, const char *image_name,
+    const char *instance_dir);
+int	emu_image_prepare(const char *arch, const char *image_name,
+    const char *checksum, const char *instance_dir);
+int	emu_image_list(void);
+int	emu_image_remove(const char *arch, const char *image_name);
+int	emu_image_cleanup(int max_age_days);
+
 /* Utility functions */
 extern int		g_verbose;
 extern int		g_quiet;
+extern gid_t		g_emu_group;
+extern char		*g_emu_group_name;
+extern enum emu_output_format	g_output_format;
 const char	*emu_arch_to_string(enum emu_arch arch);
 enum emu_arch	emu_string_to_arch(const char *str);
 const char	*emu_mode_to_string(enum emu_mode mode);
@@ -196,6 +238,7 @@ void		emu_output_instance_list_header(void);
 void		emu_set_output_format(enum emu_output_format format);
 enum emu_output_format	emu_get_output_format(void);
 void		emu_output_error(const char *fmt, ...);
+void		emu_output_error_v(const char *fmt, va_list ap);
 void		emu_output_info(const char *fmt, ...);
 void		emu_output_verbose(const char *fmt, ...);
 __END_DECLS

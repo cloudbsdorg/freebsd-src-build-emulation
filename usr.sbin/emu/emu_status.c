@@ -29,7 +29,9 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
+#include <sys/user.h>
 #include <sys/wait.h>
 
 #include <err.h>
@@ -291,7 +293,7 @@ show_status(const char *name)
 }
 
 int
-cmd_status(int argc, char *argv[])
+emu_cmd_status(int argc, char *argv[])
 {
 	int ch;
 	int option_index;

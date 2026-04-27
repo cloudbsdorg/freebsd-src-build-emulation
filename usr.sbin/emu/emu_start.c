@@ -62,7 +62,6 @@ emu_cmd_start(int argc, char *argv[])
 	char *arch = NULL;
 	int ch;
 	int error;
-	pid_t pid;
 
 	while ((ch = getopt(argc, argv, "m:n:v")) != -1) {
 		switch (ch) {
@@ -157,7 +156,6 @@ emu_cmd_start(int argc, char *argv[])
 	if (mode == EMU_MODE_AUTO) {
 		/* Check if target arch matches host arch */
 		char host_arch[32];
-		struct sysctl_oid_list *oidp;
 		size_t len = sizeof(host_arch);
 		
 		if (sysctlbyname("kern.arch", host_arch, &len, NULL, 0) == 0) {

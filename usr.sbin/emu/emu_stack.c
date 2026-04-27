@@ -102,8 +102,6 @@ emu_cmd_stack(int argc, char *argv[])
 	if (error != 0) {
 		if (errno == ENOENT) {
 			fprintf(stderr, "Instance '%s' not found or not running\n", instance_name);
-		} else if (errno == ENODATA) {
-			fprintf(stderr, "No stack trace available for instance '%s'\n", instance_name);
 		} else {
 			fprintf(stderr, "Failed to read stack trace: %s\n", strerror(errno));
 		}

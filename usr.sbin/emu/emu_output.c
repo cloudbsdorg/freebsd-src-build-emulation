@@ -47,7 +47,6 @@ __FBSDID("$FreeBSD$");
  */
 
 /* Global output state */
-static enum emu_output_format g_output_format = EMU_OUTPUT_TEXT;
 static int g_output_started = 0;
 
 void

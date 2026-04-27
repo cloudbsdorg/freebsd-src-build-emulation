@@ -55,7 +55,6 @@ emu_cmd_blob(int argc, char *argv[])
 	const char *blob_name = NULL;
 	char sysctl_name[PATH_MAX];
 	char sysctl_value[PATH_MAX];
-	int ch;
 	int error;
 
 	if (argc < 1) {

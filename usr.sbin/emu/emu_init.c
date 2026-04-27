@@ -28,6 +28,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
+#include <sys/unistd.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -37,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "emu.h"
 
@@ -84,8 +86,8 @@ emu_cmd_init(int argc, char *argv[])
 			break;
 		case 'm':
 			memory = strtoull(optarg, NULL, 0);
-			if (memory < (64 * 1024 * 1024) ||
-			    memory > (64 * 1024 * 1024 * 1024)) {
+			if (memory < (64ULL * 1024 * 1024) ||
+			    memory > (64ULL * 1024 * 1024 * 1024)) {
 				fprintf(stderr, "Invalid memory size (must be 64M-64G)\n");
 				return (EINVAL);
 			}
@@ -107,7 +109,7 @@ emu_cmd_init(int argc, char *argv[])
 	/* Generate instance name if not provided */
 	if (name == NULL) {
 		static int instance_counter = 0;
-		char hostname[HOST_NAME_MAX];
+		char hostname[MAXHOSTNAMELEN];
 		
 		if (gethostname(hostname, sizeof(hostname)) != 0)
 			strlcpy(hostname, "unknown", sizeof(hostname));
@@ -177,7 +179,7 @@ emu_cmd_init(int argc, char *argv[])
 	/* Register instance with kernel module via sysctl */
 	snprintf(sysctl_name, sizeof(sysctl_name),
 	    "kern.emulation.instance.create");
-	error = sysctlbyname(sysctl_name, NULL, NULL, (void *)name, strlen(name));
+	error = sysctlbyname(sysctl_name, NULL, NULL, __DECONST(void *, name), strlen(name));
 	if (error != 0) {
 		if (errno == EEXIST) {
 			fprintf(stderr, "Instance '%s' already exists\n", name);
@@ -202,7 +204,7 @@ emu_cmd_init(int argc, char *argv[])
 }
 
 /* Helper function to create directory with parent directories */
-static int
+int
 mkdirp(const char *path, mode_t mode)
 {
 	char tmp[PATH_MAX];

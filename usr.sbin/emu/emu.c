@@ -28,6 +28,7 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <stdarg.h>
 #include <sys/ioctl.h>
 #include <sys/module.h>
 #include <sys/stat.h>
@@ -79,6 +80,7 @@ static int cmd_test(int argc, char *argv[]);
 static int cmd_snapshot(int argc, char *argv[]);
 static int cmd_restore(int argc, char *argv[]);
 static int cmd_blob(int argc, char *argv[]);
+static int cmd_image(int argc, char *argv[]);
 
 /* Available commands */
 static struct emu_command commands[] = {
@@ -96,17 +98,18 @@ static struct emu_command commands[] = {
 	{ "snapshot", "Create instance snapshot", cmd_snapshot },
 	{ "restore", "Restore from snapshot", cmd_restore },
 	{ "blob", "Manage firmware blobs", cmd_blob },
+	{ "image", "Manage base disk images", cmd_image },
 	{ "help", "Show help message", cmd_help },
 	{ "version", "Show version information", cmd_version },
 	{ NULL, NULL, NULL }
 };
 
 /* Global options */
-static int g_verbose = 0;
-static int g_quiet = 0;
-static gid_t g_emu_group = 0; /* 0 means use default GID_EMU */
-static char *g_emu_group_name = NULL; /* Group name if specified */
-static enum emu_output_format g_output_format = EMU_OUTPUT_TEXT;
+int g_verbose = 0;
+int g_quiet = 0;
+gid_t g_emu_group = 0; /* 0 means use default GID_EMU */
+char *g_emu_group_name = NULL; /* Group name if specified */
+enum emu_output_format g_output_format = EMU_OUTPUT_TEXT;
 
 static void
 usage(void)
@@ -150,7 +153,7 @@ cmd_help(int argc, char *argv[])
 }
 
 static int
-cmd_version(int argc, char *argv[])
+cmd_version(int argc __unused, char *argv[] __unused)
 {
 	printf("emu FreeBSD Emulation Framework Tool\n");
 	printf("Version: 0.1.0\n");
@@ -240,6 +243,12 @@ static int
 cmd_blob(int argc, char *argv[])
 {
 	return (emu_cmd_blob(argc, argv));
+}
+
+static int
+cmd_image(int argc, char *argv[])
+{
+	return (emu_cmd_image(argc, argv));
 }
 
 int
@@ -411,25 +420,3 @@ emu_state_to_string(enum emu_state state)
 	}
 }
 
-void
-emu_output_error(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	vwarnx(fmt, ap);
-	va_end(ap);
-}
-
-void
-emu_output_info(const char *fmt, ...)
-{
-	va_list ap;
-
-	if (g_quiet)
-		return;
-
-	va_start(ap, fmt);
-	vwarnx(fmt, ap);
-	va_end(ap);
-}
