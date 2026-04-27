@@ -50,6 +50,7 @@ extern enum emu_output_format g_output_format;
 #define EMU_DEFAULT_CPU_LEVEL	1
 #define EMU_DEFAULT_MEMORY	(512 * 1024 * 1024)	/* 512 MB */
 #define EMU_DEFAULT_CPUS	1
+#define EMU_DEFAULT_SOCKETS	1
 
 /*
  * emu init - Initialize a new emulated instance
@@ -68,11 +69,12 @@ emu_cmd_init(int argc, char *argv[])
 	int cpu_level = EMU_DEFAULT_CPU_LEVEL;
 	uint64_t memory = EMU_DEFAULT_MEMORY;
 	int cpus = EMU_DEFAULT_CPUS;
+	int sockets = EMU_DEFAULT_SOCKETS;
 	int ch;
 	int error;
 	int fd;
 
-	while ((ch = getopt(argc, argv, "a:c:m:n:v")) != -1) {
+	while ((ch = getopt(argc, argv, "a:c:m:n:s:v")) != -1) {
 		switch (ch) {
 		case 'a':
 			arch = optarg;
@@ -94,6 +96,13 @@ emu_cmd_init(int argc, char *argv[])
 			break;
 		case 'n':
 			name = optarg;
+			break;
+		case 's':
+			sockets = atoi(optarg);
+			if (sockets < 1 || sockets > 8) {
+				fprintf(stderr, "Invalid socket count (must be 1-8)\n");
+				return (EINVAL);
+			}
 			break;
 		case 'v':
 			g_verbose = 1;
@@ -130,6 +139,7 @@ emu_cmd_init(int argc, char *argv[])
 		printf("  CPU Level: %d\n", cpu_level);
 		printf("  Memory: %llu bytes\n", (unsigned long long)memory);
 		printf("  CPUs: %d\n", cpus);
+		printf("  Sockets: %d\n", sockets);
 	}
 
 	/* Create instance directory under XDG data directory */
@@ -170,6 +180,7 @@ emu_cmd_init(int argc, char *argv[])
 	dprintf(fd, "cpu_level=%d\n", cpu_level);
 	dprintf(fd, "memory=%llu\n", (unsigned long long)memory);
 	dprintf(fd, "cpus=%d\n", cpus);
+	dprintf(fd, "sockets=%d\n", sockets);
 	dprintf(fd, "state=INITIALIZED\n");
 	close(fd);
 

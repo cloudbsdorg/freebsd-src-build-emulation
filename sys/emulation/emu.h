@@ -68,8 +68,8 @@ void	emu_instance_deregister(void);
 
 /* Instance lifecycle management */
 int	emu_instance_create(const char *name, uid_t uid, gid_t gid,
-		    uint64_t memory_limit, uint64_t cpu_time_limit,
-		    uint64_t *inst_id_out);
+	    uint64_t memory_limit, uint64_t cpu_time_limit, int num_vcpus,
+	    int num_sockets, uint64_t *inst_id_out);
 int	emu_instance_destroy(uint64_t inst_id);
 int	emu_instance_start(uint64_t inst_id);
 int	emu_instance_stop(uint64_t inst_id);
