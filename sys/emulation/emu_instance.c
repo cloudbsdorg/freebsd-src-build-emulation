@@ -46,6 +46,7 @@
 #include <sys/time.h>
 #include <sys/limits.h>
 #include "emu.h"
+#include "emu_smp.h"
 
 /*
  * Instance resource limits
@@ -71,6 +72,9 @@ struct emu_instance {
 	uint64_t		inst_cpu_time_used;	/* Current CPU time used */
 	struct timeval		inst_start_time;	/* When instance was started */
 	struct timeval		inst_last_activity;	/* Last activity timestamp */
+	int			inst_num_vcpus;	/* Number of vCPUs */
+	int			inst_num_sockets;	/* Number of sockets */
+	struct emu_vcpu_state	*inst_vcpus;	/* vCPU state array */
 	TAILQ_ENTRY(emu_instance) inst_link;
 };
 
@@ -288,7 +292,7 @@ emu_find_instance_by_name(const char *name)
  */
 int
 emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limit,
-    uint64_t cpu_time_limit, uint64_t *inst_id_out)
+    uint64_t cpu_time_limit, int num_vcpus, int num_sockets, uint64_t *inst_id_out)
 {
 	struct emu_instance *inst;
 	int error;
@@ -308,6 +312,19 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		return (error);
 	}
 
+	/* Validate vCPU configuration */
+	if (num_vcpus <= 0)
+		num_vcpus = 1;
+	if (num_sockets <= 0)
+		num_sockets = 1;
+
+	error = emu_validate_vcpu_config(num_vcpus, num_sockets, uid,
+	    suser(curthread) == 0);
+	if (error != 0) {
+		mtx_unlock(&emu_instance_lock);
+		return (error);
+	}
+
 	/* Allocate instance structure */
 	inst = malloc(sizeof(*inst), M_EMU, M_WAITOK | M_ZERO);
 	inst->inst_id = emu_next_instance_id++;
@@ -319,8 +336,28 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 	    memory_limit : emu_max_memory_per_instance;
 	inst->inst_cpu_time_limit = cpu_time_limit != 0 ?
 	    cpu_time_limit : emu_max_cpu_time_per_instance;
+	inst->inst_num_vcpus = num_vcpus;
+	inst->inst_num_sockets = num_sockets;
 	getmicrouptime(&inst->inst_start_time);
 	inst->inst_last_activity = inst->inst_start_time;
+
+	/* Initialize vCPU array */
+	error = emu_vcpu_array_init(&inst->inst_vcpus, num_vcpus);
+	if (error != 0) {
+		mtx_unlock(&emu_instance_lock);
+		free(inst, M_EMU);
+		return (error);
+	}
+
+	/* Assign APIC IDs based on topology */
+	for (int i = 0; i < num_vcpus; i++) {
+		int socket_id = i / (num_vcpus / num_sockets);
+		int core_id = i % (num_vcpus / num_sockets);
+		inst->inst_vcpus[i].socket_id = socket_id;
+		inst->inst_vcpus[i].core_id = core_id;
+		inst->inst_vcpus[i].thread_id = 0;
+		inst->inst_vcpus[i].apic_id = emu_calc_apic_id(socket_id, core_id, 0);
+	}
 
 	/* Update user limits */
 	emu_user_create_instance(uid, inst->inst_memory_limit);
@@ -333,8 +370,9 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 	if (inst_id_out != NULL)
 		*inst_id_out = inst->inst_id;
 
-	printf("emu: created instance %s (ID %lu, UID %d, memory limit %lu bytes)\n",
-	    name, (u_long)inst->inst_id, uid, (u_long)inst->inst_memory_limit);
+	printf("emu: created instance %s (ID %lu, UID %d, memory limit %lu bytes, %d vCPUs, %d sockets)\n",
+	    name, (u_long)inst->inst_id, uid, (u_long)inst->inst_memory_limit,
+	    num_vcpus, num_sockets);
 
 	return (0);
 }
@@ -373,6 +411,10 @@ emu_instance_destroy(uint64_t inst_id)
 
 	printf("emu: destroyed instance %s (ID %lu)\n",
 	    inst->inst_name, (u_long)inst->inst_id);
+
+	/* Destroy vCPU array */
+	if (inst->inst_vcpus != NULL)
+		emu_vcpu_array_destroy(inst->inst_vcpus, inst->inst_num_vcpus);
 
 	free(inst, M_EMU);
 

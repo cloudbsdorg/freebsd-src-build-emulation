@@ -60,11 +60,20 @@ emu_cmd_start(int argc, char *argv[])
 	char instance_dir[PATH_MAX];
 	char config_file[PATH_MAX];
 	char *arch = NULL;
+	int cpus = 1;
+	int sockets = 1;
 	int ch;
 	int error;
 
-	while ((ch = getopt(argc, argv, "m:n:v")) != -1) {
+	while ((ch = getopt(argc, argv, "c:m:n:s:v")) != -1) {
 		switch (ch) {
+		case 'c':
+			cpus = atoi(optarg);
+			if (cpus < 1 || cpus > 64) {
+				fprintf(stderr, "Invalid CPU count (must be 1-64)\n");
+				return (EINVAL);
+			}
+			break;
 		case 'm':
 			mode_str = optarg;
 			if (strcmp(mode_str, "bhyve") == 0)
@@ -82,6 +91,13 @@ emu_cmd_start(int argc, char *argv[])
 		case 'n':
 			name = optarg;
 			break;
+		case 's':
+			sockets = atoi(optarg);
+			if (sockets < 1 || sockets > 8) {
+				fprintf(stderr, "Invalid socket count (must be 1-8)\n");
+				return (EINVAL);
+			}
+			break;
 		case 'v':
 			g_verbose = 1;
 			break;
@@ -94,7 +110,7 @@ emu_cmd_start(int argc, char *argv[])
 	argv += optind;
 
 	if (name == NULL) {
-		fprintf(stderr, "Usage: emu start [--name <name>] [--mode <bhyve|emulator|auto>] [-v]\n");
+		fprintf(stderr, "Usage: emu start [--name <name>] [--cpus <count>] [--sockets <count>] [--mode <bhyve|emulator|auto>] [-v]\n");
 		return (EINVAL);
 	}
 
@@ -137,6 +153,10 @@ emu_cmd_start(int argc, char *argv[])
 		
 		if (strcmp(key, "arch") == 0)
 			arch = strdup(value);
+		else if (strcmp(key, "cpus") == 0)
+			cpus = atoi(value);
+		else if (strcmp(key, "sockets") == 0)
+			sockets = atoi(value);
 	}
 	fclose(fp);
 
@@ -150,6 +170,8 @@ emu_cmd_start(int argc, char *argv[])
 		printf("  Architecture: %s\n", arch);
 		printf("  Mode: %s\n", mode == EMU_MODE_BHYVE ? "bhyve" :
 		    mode == EMU_MODE_EMULATOR ? "emulator" : "auto");
+		printf("  CPUs: %d\n", cpus);
+		printf("  Sockets: %d\n", sockets);
 	}
 
 	/* Auto-detect mode if not specified */
