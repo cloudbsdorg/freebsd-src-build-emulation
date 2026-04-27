@@ -11,6 +11,7 @@ SRCS+=	emu_snapshot.c emu_blob.c
 SRCS+=	emu_engine.c
 SRCS+=	emu_boot.c
 SRCS+=	emu_decoder.c
+SRCS+=	emu_bhyve.c
 MAN=	emu.8
 
 WARNS?=	6
