@@ -129,6 +129,10 @@ struct emu_cpu_state {
 
 	/* Architecture identifier */
 	int		arch;
+
+	/* CPU identifier and state */
+	uint32_t	cpu_id;
+	bool		halted;
 };
 
 /*

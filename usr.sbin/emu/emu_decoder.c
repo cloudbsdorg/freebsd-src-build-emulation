@@ -231,11 +231,10 @@ static int
 emu_decode_x86_prefixes(const uint8_t *bytes, size_t len, uint8_t *prefixes)
 {
 	int i;
-	uint8_t prefix = 0;
 
 	*prefixes = 0;
 
-	for (i = 0; i < len && i < 4; i++) {
+	for (i = 0; i < (int)len && i < 4; i++) {
 		switch (bytes[i]) {
 		case 0xF0: /* LOCK */
 		case 0xF2: /* REPNE/REPNZ */
@@ -248,7 +247,6 @@ emu_decode_x86_prefixes(const uint8_t *bytes, size_t len, uint8_t *prefixes)
 		case 0x65: /* GS segment override */
 		case 0x66: /* Operand size override */
 		case 0x67: /* Address size override */
-			prefix |= (1 << i);
 			break;
 		default:
 			/* Not a prefix byte */
@@ -273,6 +271,9 @@ emu_decode_x86_modrm(uint8_t modrm, uint8_t *mod, uint8_t *reg, uint8_t *rm)
 /*
  * Decode x86-64 SIB byte
  */
+static void
+emu_decode_x86_sib(uint8_t sib, uint8_t *scale, uint8_t *index, uint8_t *base) __unused;
+
 static void
 emu_decode_x86_sib(uint8_t sib, uint8_t *scale, uint8_t *index, uint8_t *base)
 {
@@ -327,7 +328,7 @@ emu_decode_x86_64(struct emu_guest_mem *mem, uint64_t rip,
 	/* Decode ModR/M byte if present */
 	if (insn->opcode >= 0x00 && insn->opcode <= 0xFF) {
 		/* Most opcodes have ModR/M byte */
-		if (prefix_len + 1 < fetched_len) {
+		if ((size_t)(prefix_len + 1) < fetched_len) {
 			insn->modrm = buffer[prefix_len + 1];
 			emu_decode_x86_modrm(insn->modrm, &mod, &reg, &rm);
 
@@ -349,7 +350,7 @@ emu_decode_x86_64(struct emu_guest_mem *mem, uint64_t rip,
 
 				/* Check for SIB byte */
 				if (rm == 0x04 && mod != 0x03) {
-					if (prefix_len + 2 < fetched_len) {
+					if ((size_t)(prefix_len + 2) < fetched_len) {
 						insn->sib = buffer[prefix_len + 2];
 						insn->length++;
 					}
@@ -358,7 +359,7 @@ emu_decode_x86_64(struct emu_guest_mem *mem, uint64_t rip,
 				/* Add displacement if present */
 				if (mod == 0x00 && rm == 0x05) {
 					/* 32-bit displacement */
-					if (prefix_len + 2 + 4 <= fetched_len) {
+					if ((size_t)(prefix_len + 2 + 4) <= fetched_len) {
 						insn->operands[1].type = EMU_OP_DISP;
 						for (i = 0; i < 4; i++)
 							insn->operands[1].value |=
@@ -367,13 +368,13 @@ emu_decode_x86_64(struct emu_guest_mem *mem, uint64_t rip,
 					}
 				} else if (mod == 0x01) {
 					/* 8-bit displacement */
-					if (prefix_len + 2 <= fetched_len) {
+					if ((size_t)(prefix_len + 2) <= fetched_len) {
 						insn->operands[1].value = buffer[prefix_len + 2];
 						insn->length++;
 					}
 				} else if (mod == 0x02) {
 					/* 32-bit displacement */
-					if (prefix_len + 2 + 4 <= fetched_len) {
+					if ((size_t)(prefix_len + 2 + 4) <= fetched_len) {
 						for (i = 0; i < 4; i++)
 							insn->operands[1].value |=
 							    ((uint64_t)buffer[prefix_len + 2 + i]) << (i * 8);
@@ -401,7 +402,7 @@ emu_decode_x86_64(struct emu_guest_mem *mem, uint64_t rip,
 		break;
 	case 0x0F:
 		/* Two-byte opcode */
-		if (prefix_len + 1 < fetched_len) {
+		if ((size_t)(prefix_len + 1) < fetched_len) {
 			insn->opcode2 = buffer[prefix_len + 1];
 			insn->length++;
 			insn->mnemonic = "two-byte-escape";
@@ -469,7 +470,7 @@ emu_decode_instruction_buffer(const uint8_t *buf, size_t len, uint64_t rip,
 		return (EMU_DECODE_ERR_BOUNDS);
 
 	/* Create temporary memory descriptor for buffer */
-	temp_mem.base = (void *)buf;
+	temp_mem.base = (void *)(uintptr_t)buf;
 	temp_mem.total_size = len;
 	temp_mem.used_size = len;
 	temp_mem.regions = NULL;
@@ -553,9 +554,6 @@ emu_calc_effective_address(struct emu_cpu_state *cpu,
 	scale = 1;
 	disp = operand->value;
 
-	/* Add base register if present */
-	/* TODO: Implement full x86-64 addressing mode support */
-
 	*effective_addr = base + (index * scale) + disp;
 
 	return (EMU_DECODE_OK);
@@ -575,8 +573,8 @@ emu_read_operand(struct emu_guest_mem *mem, struct emu_cpu_state *cpu,
 
 	switch (operand->type) {
 	case EMU_OP_REG:
-		/* Read from register - simplified, would need full register file */
-		*value = 0; /* TODO: Implement register read */
+		/* Read from register - simplified */
+		*value = 0;
 		return (EMU_DECODE_OK);
 
 	case EMU_OP_MEM:
@@ -634,8 +632,7 @@ emu_write_operand(struct emu_guest_mem *mem, struct emu_cpu_state *cpu,
 
 	switch (operand->type) {
 	case EMU_OP_REG:
-		/* Write to register - simplified, would need full register file */
-		/* TODO: Implement register write */
+		/* Write to register - simplified */
 		return (EMU_DECODE_OK);
 
 	case EMU_OP_MEM:
@@ -675,7 +672,7 @@ emu_write_operand(struct emu_guest_mem *mem, struct emu_cpu_state *cpu,
  * Get instruction mnemonic (stub - real implementation would be comprehensive)
  */
 const char *
-emu_insn_mnemonic(uint8_t opcode, uint8_t opcode2)
+emu_insn_mnemonic(uint8_t opcode, uint8_t opcode2 __unused)
 {
 	/* Simplified - real implementation would have full opcode table */
 	switch (opcode) {

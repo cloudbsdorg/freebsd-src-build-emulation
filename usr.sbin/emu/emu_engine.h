@@ -33,6 +33,7 @@
 #include <sys/time.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 /*
  * Emulation Engine - Bounds-Checked Memory Access
@@ -126,6 +127,10 @@ enum emu_mem_access emu_mem_write64(struct emu_guest_mem *mem, uint64_t guest_ad
 enum emu_mem_access emu_mem_write_bytes(struct emu_guest_mem *mem, uint64_t guest_addr,
     const void *buffer, size_t len);
 
+/* Memory isolation and cleanup */
+void emu_mem_isolate(struct emu_guest_mem *mem);
+void emu_mem_cleanup(struct emu_guest_mem *mem);
+
 /* Bounds check helper - returns true if access is valid */
 bool emu_mem_check_bounds(struct emu_guest_mem *mem, uint64_t guest_addr, size_t len);
 
@@ -210,19 +215,25 @@ emu_mem_raw_read8(void *base, uint64_t offset)
 static inline uint16_t
 emu_mem_raw_read16(void *base, uint64_t offset)
 {
-	return (*(uint16_t *)((uint8_t *)base + offset));
+	uint16_t val;
+	memcpy(&val, (uint8_t *)base + offset, sizeof(val));
+	return (val);
 }
 
 static inline uint32_t
 emu_mem_raw_read32(void *base, uint64_t offset)
 {
-	return (*(uint32_t *)((uint8_t *)base + offset));
+	uint32_t val;
+	memcpy(&val, (uint8_t *)base + offset, sizeof(val));
+	return (val);
 }
 
 static inline uint64_t
 emu_mem_raw_read64(void *base, uint64_t offset)
 {
-	return (*(uint64_t *)((uint8_t *)base + offset));
+	uint64_t val;
+	memcpy(&val, (uint8_t *)base + offset, sizeof(val));
+	return (val);
 }
 
 static inline void
@@ -234,19 +245,19 @@ emu_mem_raw_write8(void *base, uint64_t offset, uint8_t value)
 static inline void
 emu_mem_raw_write16(void *base, uint64_t offset, uint16_t value)
 {
-	(*(uint16_t *)((uint8_t *)base + offset)) = value;
+	memcpy((uint8_t *)base + offset, &value, sizeof(value));
 }
 
 static inline void
 emu_mem_raw_write32(void *base, uint64_t offset, uint32_t value)
 {
-	(*(uint32_t *)((uint8_t *)base + offset)) = value;
+	memcpy((uint8_t *)base + offset, &value, sizeof(value));
 }
 
 static inline void
 emu_mem_raw_write64(void *base, uint64_t offset, uint64_t value)
 {
-	(*(uint64_t *)((uint8_t *)base + offset)) = value;
+	memcpy((uint8_t *)base + offset, &value, sizeof(value));
 }
 
 #endif /* !_EMU_ENGINE_H_ */
