@@ -48,6 +48,8 @@ void emu_instance_init(void);
 void emu_instance_destroy(void);
 void emu_stack_init(void);
 void emu_stack_destroy(void);
+int emu_audit_init(void);
+void emu_audit_destroy(void);
 
 /*
  * Emulation Framework Core Module (emu_core.ko)
@@ -184,6 +186,14 @@ emu_core_modevent(module_t mod, int type, void *data)
 		/* Initialize stack capture infrastructure */
 		emu_stack_init();
 
+		/* Initialize audit logging subsystem */
+		error = emu_audit_init();
+		if (error != 0) {
+			printf("emu_core: Failed to initialize audit logging, "
+			    "error %d\n", error);
+			/* Continue anyway - audit is optional */
+		}
+
 		/* Validate no conflicts */
 		/* XXX: Check for conflicting emulation frameworks */
 
@@ -213,6 +223,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 
 		/* Clean up stack capture infrastructure */
 		emu_stack_destroy();
+
+		/* Clean up audit logging subsystem */
+		emu_audit_destroy();
 
 		/* Clean up sysctl infrastructure */
 		emu_sysctl_destroy();
