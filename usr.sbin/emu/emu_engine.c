@@ -30,6 +30,7 @@
 #include <sys/capability.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,7 @@
 #include "emu_engine.h"
 #include "emu.h"
 #include "emu_mem.h"
+#include "emu_memmgmt.h"
 
 /*
  * Emulation Engine - Bounds-Checked Memory Access Implementation
@@ -587,16 +589,33 @@ emu_mem_remove_region(struct emu_guest_mem *mem, uint64_t base)
 int
 emu_mem_init(struct emu_guest_mem *mem, size_t total_size)
 {
+	int policy;
+
 	if (mem == NULL || total_size == 0)
 		return (-1);
 
-	/* Allocate guest memory */
-	mem->base = malloc(total_size);
-	if (mem->base == NULL)
-		return (-1);
+	/* Get memory policy from sysctl */
+	policy = emu_memmgmt_get_policy();
 
-	/* Zero out the memory */
-	memset(mem->base, 0, total_size);
+	if (policy == EMU_MEM_POLICY_DEMAND) {
+		/* Demand-paged allocation (MAP_NORESERVE) */
+		mem->base = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
+		    MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+		if (mem->base == MAP_FAILED) {
+			mem->base = NULL;
+			return (-1);
+		}
+		/* Zero out the memory */
+		memset(mem->base, 0, total_size);
+	} else {
+		/* Prealloc mode - traditional malloc */
+		mem->base = malloc(total_size);
+		if (mem->base == NULL)
+			return (-1);
+
+		/* Zero out the memory */
+		memset(mem->base, 0, total_size);
+	}
 
 	/* Initialize descriptor */
 	mem->total_size = total_size;
@@ -611,7 +630,10 @@ emu_mem_init(struct emu_guest_mem *mem, size_t total_size)
 	if (emu_mem_add_region(mem, 0, total_size,
 	    EMU_MEM_REGION_READ | EMU_MEM_REGION_WRITE | EMU_MEM_REGION_EXECUTE,
 	    "guest_ram") != 0) {
-		free(mem->base);
+		if (policy == EMU_MEM_POLICY_DEMAND)
+			munmap(mem->base, total_size);
+		else
+			free(mem->base);
 		mem->base = NULL;
 		return (-1);
 	}
@@ -663,8 +685,13 @@ emu_mem_cleanup(struct emu_guest_mem *mem)
 void
 emu_mem_destroy(struct emu_guest_mem *mem)
 {
+	int policy;
+
 	if (mem == NULL)
 		return;
+
+	/* Get memory policy to determine deallocation method */
+	policy = emu_memmgmt_get_policy();
 
 	/* Free region descriptors */
 	if (mem->regions != NULL) {
@@ -672,9 +699,12 @@ emu_mem_destroy(struct emu_guest_mem *mem)
 		mem->regions = NULL;
 	}
 
-	/* Free guest memory */
+	/* Free guest memory based on allocation method */
 	if (mem->base != NULL) {
-		free(mem->base);
+		if (policy == EMU_MEM_POLICY_DEMAND)
+			munmap(mem->base, mem->total_size);
+		else
+			free(mem->base);
 		mem->base = NULL;
 	}
 
