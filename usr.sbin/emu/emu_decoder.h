@@ -111,21 +111,37 @@ struct emu_insn {
 
 /* CPU context structure (architecture-specific) */
 struct emu_cpu_state {
-	/* General purpose registers */
-	uint64_t	rax, rbx, rcx, rdx;
-	uint64_t	rsi, rdi, rbp, rsp;
-	uint64_t	r8, r9, r10, r11;
-	uint64_t	r12, r13, r14, r15;
+	union {
+		/* x86-64 register layout */
+		struct {
+			/* General purpose registers */
+			uint64_t	rax, rbx, rcx, rdx;
+			uint64_t	rsi, rdi, rbp, rsp;
+			uint64_t	r8, r9, r10, r11;
+			uint64_t	r12, r13, r14, r15;
 
-	/* Instruction pointer and flags */
-	uint64_t	rip;
-	uint64_t	rflags;
+			/* Instruction pointer and flags */
+			uint64_t	rip;
+			uint64_t	rflags;
 
-	/* Segment registers */
-	uint16_t	cs, ds, es, fs, gs, ss;
+			/* Segment registers */
+			uint16_t	cs, ds, es, fs, gs, ss;
 
-	/* Control registers */
-	uint64_t	cr0, cr2, cr3, cr4;
+			/* Control registers */
+			uint64_t	cr0, cr2, cr3, cr4;
+		};
+
+		/* PowerPC/ARM64/ARM register layout */
+		struct {
+			uint64_t	gpr[32];	/* General purpose registers */
+			uint64_t	pc;		/* Program counter */
+			uint64_t	msr;		/* Machine status register */
+			uint64_t	cr;		/* Condition register (PowerPC) */
+			uint64_t	xer;		/* Fixed-point exception register (PowerPC) */
+			uint64_t	lr;		/* Link register */
+			uint64_t	ctr;		/* Count register */
+		};
+	};
 
 	/* Architecture identifier */
 	int		arch;
