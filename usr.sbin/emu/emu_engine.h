@@ -77,6 +77,7 @@ struct emu_guest_mem {
 	int		num_regions;	/* Number of regions */
 	bool		strict_align;	/* Enforce strict alignment */
 	bool		initialized;	/* Memory subsystem initialized */
+	enum emu_endian	guest_endian;	/* Guest endianness (EMU_ENDIAN_LITTLE/EMU_ENDIAN_BIG) */
 };
 
 /*
@@ -258,6 +259,70 @@ static inline void
 emu_mem_raw_write64(void *base, uint64_t offset, uint64_t value)
 {
 	memcpy((uint8_t *)base + offset, &value, sizeof(value));
+}
+
+/*
+ * Endianness-aware memory access helpers
+ * These functions use the guest_endian field to determine byte order
+ */
+static inline uint16_t
+emu_mem_guest_read16(struct emu_guest_mem *mem, uint64_t offset)
+{
+	uint16_t val = emu_mem_raw_read16(mem->base, offset);
+
+	if (mem->guest_endian == EMU_ENDIAN_BIG)
+		return (be16toh(val));
+	return (le16toh(val));
+}
+
+static inline uint32_t
+emu_mem_guest_read32(struct emu_guest_mem *mem, uint64_t offset)
+{
+	uint32_t val = emu_mem_raw_read32(mem->base, offset);
+
+	if (mem->guest_endian == EMU_ENDIAN_BIG)
+		return (be32toh(val));
+	return (le32toh(val));
+}
+
+static inline uint64_t
+emu_mem_guest_read64(struct emu_guest_mem *mem, uint64_t offset)
+{
+	uint64_t val = emu_mem_raw_read64(mem->base, offset);
+
+	if (mem->guest_endian == EMU_ENDIAN_BIG)
+		return (be64toh(val));
+	return (le64toh(val));
+}
+
+static inline void
+emu_mem_guest_write16(struct emu_guest_mem *mem, uint64_t offset, uint16_t value)
+{
+	if (mem->guest_endian == EMU_ENDIAN_BIG)
+		value = htobe16(value);
+	else
+		value = htole16(value);
+	emu_mem_raw_write16(mem->base, offset, value);
+}
+
+static inline void
+emu_mem_guest_write32(struct emu_guest_mem *mem, uint64_t offset, uint32_t value)
+{
+	if (mem->guest_endian == EMU_ENDIAN_BIG)
+		value = htobe32(value);
+	else
+		value = htole32(value);
+	emu_mem_raw_write32(mem->base, offset, value);
+}
+
+static inline void
+emu_mem_guest_write64(struct emu_guest_mem *mem, uint64_t offset, uint64_t value)
+{
+	if (mem->guest_endian == EMU_ENDIAN_BIG)
+		value = htobe64(value);
+	else
+		value = htole64(value);
+	emu_mem_raw_write64(mem->base, offset, value);
 }
 
 #endif /* !_EMU_ENGINE_H_ */

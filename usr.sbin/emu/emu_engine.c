@@ -44,6 +44,7 @@
 
 #include "emu_engine.h"
 #include "emu.h"
+#include "emu_mem.h"
 
 /*
  * Emulation Engine - Bounds-Checked Memory Access Implementation
@@ -604,6 +605,7 @@ emu_mem_init(struct emu_guest_mem *mem, size_t total_size)
 	mem->num_regions = 0;
 	mem->strict_align = false;
 	mem->initialized = true;
+	mem->guest_endian = EMU_ENDIAN_LITTLE;	/* Default to little-endian (x86/x86_64) */
 
 	/* Add default region covering entire memory */
 	if (emu_mem_add_region(mem, 0, total_size,
