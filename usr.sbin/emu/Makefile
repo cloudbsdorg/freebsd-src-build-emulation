@@ -9,6 +9,7 @@ SRCS+=	emu_config.c
 SRCS+=	emu_load.c emu_stack.c emu_test.c
 SRCS+=	emu_snapshot.c emu_blob.c
 SRCS+=	emu_engine.c
+SRCS+=	emu_file_sharing.c
 SRCS+=	emu_boot.c
 SRCS+=	emu_decoder.c
 SRCS+=	emu_bhyve.c
