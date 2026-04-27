@@ -78,6 +78,7 @@ void	emu_instance_update_memory(uint64_t inst_id, uint64_t memory_used);
 void	emu_instance_update_cpu_time(uint64_t inst_id, uint64_t cpu_time);
 int	emu_instance_check_cpu_limit(uint64_t inst_id);
 int	emu_instance_get_info(uint64_t inst_id, struct sbuf *sb);
+uint64_t emu_instance_total_memory(void);
 int	emu_instance_total_count(void);
 int	emu_instance_visible_count(void);
 int	emu_instance_list(uint64_t *inst_ids, int max_count);

@@ -597,6 +597,26 @@ emu_instance_check_cpu_limit(uint64_t inst_id)
 }
 
 /*
+ * Get total memory consumed by all emulation instances
+ * Returns total memory in bytes
+ */
+uint64_t
+emu_instance_total_memory(void)
+{
+	struct emu_instance *inst;
+	uint64_t total;
+
+	mtx_lock(&emu_instance_lock);
+	total = 0;
+	TAILQ_FOREACH(inst, &emu_instances, inst_link) {
+		total += inst->inst_memory_used;
+	}
+	mtx_unlock(&emu_instance_lock);
+
+	return (total);
+}
+
+/*
  * Get instance info for sysctl
  * Returns 0 on success, error code on failure
  */
