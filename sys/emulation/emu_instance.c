@@ -359,6 +359,11 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		inst->inst_vcpus[i].apic_id = emu_calc_apic_id(socket_id, core_id, 0);
 	}
 
+	/* Create per-vCPU sysctl interfaces */
+	for (int i = 0; i < num_vcpus; i++) {
+		emu_vcpu_sysctl_create(inst->inst_id, inst->inst_name, &inst->inst_vcpus[i]);
+	}
+
 	/* Update user limits */
 	emu_user_create_instance(uid, inst->inst_memory_limit);
 
@@ -413,8 +418,13 @@ emu_instance_destroy(uint64_t inst_id)
 	    inst->inst_name, (u_long)inst->inst_id);
 
 	/* Destroy vCPU array */
-	if (inst->inst_vcpus != NULL)
+	if (inst->inst_vcpus != NULL) {
+		/* Destroy per-vCPU sysctl interfaces */
+		for (int i = 0; i < inst->inst_num_vcpus; i++) {
+			emu_vcpu_sysctl_destroy(inst->inst_id, &inst->inst_vcpus[i]);
+		}
 		emu_vcpu_array_destroy(inst->inst_vcpus, inst->inst_num_vcpus);
+	}
 
 	free(inst, M_EMU);
 
