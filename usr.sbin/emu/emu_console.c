@@ -225,7 +225,7 @@ show_console(const char *name)
 }
 
 int
-cmd_console(int argc, char *argv[])
+emu_cmd_console(int argc, char *argv[])
 {
 	int ch;
 	int option_index;

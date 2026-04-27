@@ -192,7 +192,7 @@ confirm_destruction(const char *name)
 }
 
 int
-cmd_destroy(int argc, char *argv[])
+emu_cmd_destroy(int argc, char *argv[])
 {
 	int ch;
 	int option_index;

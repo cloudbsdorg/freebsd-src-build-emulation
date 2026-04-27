@@ -417,7 +417,7 @@ emu_config_save(void)
 	return (0);
 }
 
-const struct emu_config *
+struct emu_config *
 emu_config_get(void)
 {
 	return (&g_config);
@@ -495,7 +495,7 @@ cmd_config_reset(void)
 }
 
 int
-cmd_config(int argc, char *argv[])
+emu_cmd_config(int argc, char *argv[])
 {
 	int show = 0;
 	int save = 0;

@@ -31,6 +31,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/dirent.h>
 #include <sys/stat.h>
 
+#include <dirent.h>
 #include <err.h>
 #include <errno.h>
 #include <getopt.h>
@@ -51,8 +52,8 @@ __FBSDID("$FreeBSD$");
 
 #define EMU_INSTANCE_DIR	"/var/emu"
 
-static int g_filter_arch = EMU_ARCH_UNKNOWN;
-static int g_filter_state = EMU_STATE_UNKNOWN;
+static enum emu_arch g_filter_arch = EMU_ARCH_UNKNOWN;
+static enum emu_state g_filter_state = EMU_STATE_UNKNOWN;
 
 static void
 usage_list(void)
@@ -272,7 +273,7 @@ list_instances(void)
 }
 
 int
-cmd_list(int argc, char *argv[])
+emu_cmd_list(int argc, char *argv[])
 {
 	int ch;
 	int option_index;
