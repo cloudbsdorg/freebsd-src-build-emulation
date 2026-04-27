@@ -26,6 +26,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/endian.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +58,65 @@
 
 /* ELF magic number */
 static const uint8_t elf_magic[4] = { ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3 };
+
+/*
+ * Byte-swapping helpers for ELF loading
+ * These functions swap bytes when loading big-endian ELF on little-endian host
+ */
+static uint16_t
+elf_byte_swap_16(uint16_t val)
+{
+	return (bswap16(val));
+}
+
+static uint32_t
+elf_byte_swap_32(uint32_t val)
+{
+	return (bswap32(val));
+}
+
+static uint64_t
+elf_byte_swap_64(uint64_t val)
+{
+	return (bswap64(val));
+}
+
+/*
+ * Swap ELF header fields for cross-endian loading
+ */
+static void
+elf_swap_ehdr(Elf64_Ehdr *ehdr)
+{
+	ehdr->e_type = elf_byte_swap_16(ehdr->e_type);
+	ehdr->e_machine = elf_byte_swap_16(ehdr->e_machine);
+	ehdr->e_version = elf_byte_swap_32(ehdr->e_version);
+	ehdr->e_entry = elf_byte_swap_64(ehdr->e_entry);
+	ehdr->e_phoff = elf_byte_swap_64(ehdr->e_phoff);
+	ehdr->e_shoff = elf_byte_swap_64(ehdr->e_shoff);
+	ehdr->e_flags = elf_byte_swap_32(ehdr->e_flags);
+	ehdr->e_ehsize = elf_byte_swap_16(ehdr->e_ehsize);
+	ehdr->e_phentsize = elf_byte_swap_16(ehdr->e_phentsize);
+	ehdr->e_phnum = elf_byte_swap_16(ehdr->e_phnum);
+	ehdr->e_shentsize = elf_byte_swap_16(ehdr->e_shentsize);
+	ehdr->e_shnum = elf_byte_swap_16(ehdr->e_shnum);
+	ehdr->e_shstrndx = elf_byte_swap_16(ehdr->e_shstrndx);
+}
+
+/*
+ * Swap ELF program header fields for cross-endian loading
+ */
+static void
+elf_swap_phdr(Elf64_Phdr *phdr)
+{
+	phdr->p_type = elf_byte_swap_32(phdr->p_type);
+	phdr->p_flags = elf_byte_swap_32(phdr->p_flags);
+	phdr->p_offset = elf_byte_swap_64(phdr->p_offset);
+	phdr->p_vaddr = elf_byte_swap_64(phdr->p_vaddr);
+	phdr->p_paddr = elf_byte_swap_64(phdr->p_paddr);
+	phdr->p_filesz = elf_byte_swap_64(phdr->p_filesz);
+	phdr->p_memsz = elf_byte_swap_64(phdr->p_memsz);
+	phdr->p_align = elf_byte_swap_64(phdr->p_align);
+}
 
 /*
  * Convert ELF result code to string for debugging
@@ -194,11 +254,14 @@ check_add_overflow(uint64_t a, uint64_t b, uint64_t *result)
 /*
  * Validate ELF header from buffer
  * Returns EMU_ELF_OK on success, error code on failure
+ * Handles byte-swapping for cross-endian ELF files
  */
 static enum emu_elf_result
 emu_elf_validate_header(const void *buf, size_t len, struct emu_elf_info *info)
 {
+	Elf64_Ehdr ehdr_copy;
 	const Elf64_Ehdr *ehdr;
+	bool swap_bytes;
 
 	if (buf == NULL || info == NULL)
 		return (EMU_ELF_ERR_NULL);
@@ -222,6 +285,15 @@ emu_elf_validate_header(const void *buf, size_t len, struct emu_elf_info *info)
 	if (ehdr->e_ident[EI_DATA] != ELFDATA2LSB &&
 	    ehdr->e_ident[EI_DATA] != ELFDATA2MSB)
 		return (EMU_ELF_ERR_ENDIAN);
+
+	/* Determine if byte-swapping is needed (big-endian ELF on little-endian host) */
+	swap_bytes = (ehdr->e_ident[EI_DATA] == ELFDATA2MSB);
+
+	/* Copy header and swap bytes if needed */
+	memcpy(&ehdr_copy, ehdr, sizeof(ehdr_copy));
+	if (swap_bytes)
+		elf_swap_ehdr(&ehdr_copy);
+	ehdr = &ehdr_copy;
 
 	/* ELF version check */
 	if (ehdr->e_ident[EI_VERSION] != EV_CURRENT)
@@ -339,6 +411,7 @@ emu_elf_validate(const char *path, struct emu_elf_info *info)
 
 /*
  * Parse program headers from buffer
+ * Handles byte-swapping for cross-endian ELF files
  */
 enum emu_elf_result
 emu_elf_parse_phdrs_buffer(const void *buf, size_t len,
@@ -347,6 +420,7 @@ emu_elf_parse_phdrs_buffer(const void *buf, size_t len,
 {
 	const Elf64_Phdr *phdr;
 	struct emu_elf_segment *segs;
+	bool swap_bytes;
 	int i;
 
 	if (buf == NULL || info == NULL || segments == NULL || num_segments == NULL)
@@ -357,12 +431,19 @@ emu_elf_parse_phdrs_buffer(const void *buf, size_t len,
 	if (segs == NULL)
 		return (EMU_ELF_ERR_MEMORY);
 
+	/* Determine if byte-swapping is needed */
+	swap_bytes = (info->endian == ELFDATA2MSB);
+
 	/* Parse each program header */
 	for (i = 0; i < (int)info->phnum; i++) {
 		const uint8_t *phdr_ptr = (const uint8_t *)buf + info->phoff +
 		    i * info->phentsize;
 		Elf64_Phdr phdr_copy;
 		memcpy(&phdr_copy, phdr_ptr, sizeof(phdr_copy));
+		
+		/* Swap bytes if loading big-endian ELF on little-endian host */
+		if (swap_bytes)
+			elf_swap_phdr(&phdr_copy);
 		phdr = &phdr_copy;
 
 		segs[i].vaddr = phdr->p_vaddr;
