@@ -19,6 +19,7 @@ SRCS+=	emu_mmio.c
 SRCS+=	emu_dev_uart.c
 SRCS+=	emu_dev_storage.c
 SRCS+=	emu_dev_net.c
+SRCS+=	emu_gdb.c
 MAN=	emu.8
 
 WARNS?=	6
