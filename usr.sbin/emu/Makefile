@@ -8,6 +8,7 @@ SRCS+=	emu_output.c
 SRCS+=	emu_config.c
 SRCS+=	emu_load.c emu_unload.c emu_stack.c emu_test.c
 SRCS+=	emu_snapshot.c emu_blob.c
+SRCS+=	emu_engine.c
 MAN=	emu.8
 
 WARNS?=	6
