@@ -28,6 +28,8 @@
 #define	_EMU_ENGINE_H_
 
 #include <sys/types.h>
+#include <sys/capsicum.h>
+#include <sys/capability.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -120,6 +122,26 @@ void emu_mem_scrub(struct emu_guest_mem *mem);
 /* Utility functions */
 const char *emu_mem_access_str(enum emu_mem_access access);
 void emu_mem_dump_regions(struct emu_guest_mem *mem);
+
+/*
+ * Capsicum sandboxing - Limit process capabilities after initialization
+ *
+ * These functions implement Capsicum capability mode sandboxing to
+ * restrict the emulator process after it has opened all necessary
+ * file descriptors.
+ */
+
+/* Enter Capsicum capability mode sandbox - call after opening all FDs */
+int emu_enter_sandbox(void);
+
+/* Limit rights on a specific file descriptor */
+int emu_limit_fd_rights(int fd, cap_rights_t *rights);
+
+/* Limit ioctl operations on a specific file descriptor */
+int emu_limit_fd_ioctls(int fd, const u_long *cmds, size_t ncmds);
+
+/* Check if FD is essential (kept open during sandboxing) */
+bool emu_is_essential_fd(int fd);
 
 /*
  * Inline helpers for performance-critical paths

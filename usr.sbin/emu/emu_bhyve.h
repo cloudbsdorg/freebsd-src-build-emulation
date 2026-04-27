@@ -28,6 +28,8 @@
 #define	_EMU_BHYVE_H_
 
 #include <sys/types.h>
+#include <sys/capsicum.h>
+#include <sys/capability.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -121,5 +123,21 @@ bool emu_bhyve_is_available(void);
 
 /* Get bhyve version */
 int emu_bhyve_get_version(void);
+
+/*
+ * Capsicum sandboxing for bhyve process
+ */
+
+/* Enter Capsicum capability mode for bhyve process */
+int emu_bhyve_enter_sandbox(void);
+
+/* Limit rights on VMM file descriptor */
+int emu_bhyve_limit_vmm_rights(int vmm_fd);
+
+/* Limit ioctl operations on VMM file descriptor */
+int emu_bhyve_limit_vmm_ioctls(int vmm_fd);
+
+/* Check if FD is essential for bhyve operation */
+bool emu_bhyve_is_essential_fd(int fd);
 
 #endif /* !_EMU_BHYVE_H_ */
