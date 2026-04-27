@@ -490,3 +490,81 @@ emu_smp_sysctl_destroy(void)
 
 	/* Sysctls are automatically removed with context */
 }
+
+/*
+ * Create per-vCPU sysctl interfaces
+ * Creates: kern.emulation.instance.<name>.vcpu.<id>.
+ *   - state: vCPU state (running/stopped/paused/error)
+ *   - apic_id: APIC ID
+ *   - socket_id: Socket ID
+ *   - core_id: Core ID within socket
+ *   - thread_id: Thread ID within core
+ *   - cpu_time: CPU time used (ns)
+ */
+void
+emu_vcpu_sysctl_create(uint64_t inst_id __unused, const char *inst_name,
+    struct emu_vcpu_state *vcpu)
+{
+	static struct sysctl_ctx_list vcpu_ctx;
+	struct sysctl_oid *vcpu_oid;
+	char vcpu_name[32];
+
+	if (vcpu == NULL || inst_name == NULL)
+		return;
+
+	/* Initialize context for this vCPU */
+	SYSCTL_INIT_LIST(&vcpu_ctx);
+
+	/* Create kern.emulation.instance.<name>.vcpu.<id> node */
+	snprintf(vcpu_name, sizeof(vcpu_name), "vcpu%d", vcpu->vcpu_id);
+	vcpu_oid = SYSCTL_ADD_NODE(&vcpu_ctx,
+	    SYSCTL_STATIC_CHILDREN(_kern_emulation), OID_AUTO,
+	    vcpu_name, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
+	    "vCPU %d state", vcpu->vcpu_id);
+
+	if (vcpu_oid == NULL)
+		return;
+
+	/* Add vCPU state sysctl */
+	SYSCTL_ADD_INT(&vcpu_ctx, SYSCTL_CHILDREN(vcpu_oid), OID_AUTO,
+	    "state", CTLFLAG_RD, &vcpu->state, 0,
+	    "vCPU state (0=stopped, 1=running, 2=paused, 3=error)");
+
+	/* Add APIC ID sysctl */
+	SYSCTL_ADD_UINT(&vcpu_ctx, SYSCTL_CHILDREN(vcpu_oid), OID_AUTO,
+	    "apic_id", CTLFLAG_RD, &vcpu->apic_id, 0,
+	    "APIC ID");
+
+	/* Add socket ID sysctl */
+	SYSCTL_ADD_INT(&vcpu_ctx, SYSCTL_CHILDREN(vcpu_oid), OID_AUTO,
+	    "socket_id", CTLFLAG_RD, &vcpu->socket_id, 0,
+	    "Socket ID");
+
+	/* Add core ID sysctl */
+	SYSCTL_ADD_INT(&vcpu_ctx, SYSCTL_CHILDREN(vcpu_oid), OID_AUTO,
+	    "core_id", CTLFLAG_RD, &vcpu->core_id, 0,
+	    "Core ID within socket");
+
+	/* Add thread ID sysctl */
+	SYSCTL_ADD_INT(&vcpu_ctx, SYSCTL_CHILDREN(vcpu_oid), OID_AUTO,
+	    "thread_id", CTLFLAG_RD, &vcpu->thread_id, 0,
+	    "Thread ID within core");
+
+	/* Add CPU time sysctl */
+	SYSCTL_ADD_U64(&vcpu_ctx, SYSCTL_CHILDREN(vcpu_oid), OID_AUTO,
+	    "cpu_time", CTLFLAG_RD, &vcpu->cpu_time, 0,
+	    "CPU time used (nanoseconds)");
+}
+
+/*
+ * Destroy per-vCPU sysctl interfaces
+ * Automatically cleaned up when context is destroyed
+ */
+void
+emu_vcpu_sysctl_destroy(uint64_t inst_id __unused,
+    struct emu_vcpu_state *vcpu __unused)
+{
+
+	/* Sysctls are automatically removed with context */
+	/* No explicit cleanup needed */
+}

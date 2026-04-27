@@ -106,6 +106,11 @@ const char *emu_vcpu_state_str(enum emu_vcpu_state state);
 void	emu_smp_sysctl_init(void);
 void	emu_smp_sysctl_destroy(void);
 
+/* Per-vCPU sysctl interface */
+void	emu_vcpu_sysctl_create(uint64_t inst_id, const char *inst_name,
+	    struct emu_vcpu_state *vcpu);
+void	emu_vcpu_sysctl_destroy(uint64_t inst_id, struct emu_vcpu_state *vcpu);
+
 #endif /* _KERNEL */
 
 #endif /* !_EMU_SMP_H_ */
