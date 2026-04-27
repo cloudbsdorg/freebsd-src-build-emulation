@@ -88,13 +88,6 @@ enum emu_output_format {
 /* Maximum number of share mounts per instance */
 #define	EMU_MAX_SHARES	8
 
-/* Share mount configuration */
-struct emu_share_config {
-	char		host_path[EMU_PATH_MAX];
-	char		guest_path[EMU_PATH_MAX];
-	int		read_only;
-};
-
 /* Global configuration */
 struct emu_config {
 	enum emu_arch	arch;
@@ -121,8 +114,6 @@ struct emu_instance_config {
 	char		image_path[EMU_PATH_MAX];
 	char		kernel_path[EMU_PATH_MAX];
 	char		blob_path[EMU_PATH_MAX];
-	struct emu_share_config	shares[EMU_MAX_SHARES];
-	int		num_shares;
 };
 
 /* Instance state */

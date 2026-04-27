@@ -113,7 +113,6 @@ emu_bhyve_is_available(void)
 int
 emu_bhyve_get_version(void)
 {
-	int version;
 	int vmm_fd;
 
 	vmm_fd = open(VMM_DEVICE_PATH, O_RDWR);

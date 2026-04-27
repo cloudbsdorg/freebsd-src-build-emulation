@@ -618,6 +618,43 @@ emu_mem_init(struct emu_guest_mem *mem, size_t total_size)
 }
 
 /*
+ * Isolate guest memory (mark read-only after crash)
+ */
+void
+emu_mem_isolate(struct emu_guest_mem *mem)
+{
+	int i;
+
+	if (mem == NULL || mem->regions == NULL)
+		return;
+
+	/* Mark all regions as read-only */
+	for (i = 0; i < mem->num_regions; i++)
+		mem->regions[i].flags &= ~(EMU_MEM_REGION_WRITE | EMU_MEM_REGION_EXECUTE);
+}
+
+/*
+ * Clean up guest memory after crash
+ */
+void
+emu_mem_cleanup(struct emu_guest_mem *mem)
+{
+	if (mem == NULL)
+		return;
+
+	/* Clear memory contents */
+	if (mem->base != NULL)
+		memset(mem->base, 0, mem->total_size);
+
+	/* Reset region flags */
+	if (mem->regions != NULL) {
+		int i;
+		for (i = 0; i < mem->num_regions; i++)
+			mem->regions[i].flags = EMU_MEM_REGION_READ;
+	}
+}
+
+/*
  * Destroy guest memory subsystem
  * Frees all allocated memory and region descriptors
  */

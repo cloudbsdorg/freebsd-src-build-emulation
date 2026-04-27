@@ -310,7 +310,7 @@ emu_elf_validate(const char *path, struct emu_elf_info *info)
 		return (EMU_ELF_ERR_IO);
 	}
 
-	if (st.st_size < sizeof(Elf64_Ehdr)) {
+	if ((size_t)st.st_size < sizeof(Elf64_Ehdr)) {
 		close(fd);
 		return (EMU_ELF_ERR_FILE_SIZE);
 	}
@@ -358,9 +358,12 @@ emu_elf_parse_phdrs_buffer(const void *buf, size_t len,
 		return (EMU_ELF_ERR_MEMORY);
 
 	/* Parse each program header */
-	for (i = 0; i < info->phnum; i++) {
-		phdr = (const Elf64_Phdr *)((const uint8_t *)buf + info->phoff +
-		    i * info->phentsize);
+	for (i = 0; i < (int)info->phnum; i++) {
+		const uint8_t *phdr_ptr = (const uint8_t *)buf + info->phoff +
+		    i * info->phentsize;
+		Elf64_Phdr phdr_copy;
+		memcpy(&phdr_copy, phdr_ptr, sizeof(phdr_copy));
+		phdr = &phdr_copy;
 
 		segs[i].vaddr = phdr->p_vaddr;
 		segs[i].offset = phdr->p_offset;
@@ -541,12 +544,11 @@ emu_elf_load_buffer(const void *buf, size_t len, struct emu_guest_mem *mem,
 
 		/* Copy segment data to guest memory */
 		if (segments[i].filesz > 0) {
-			result = emu_mem_write_bytes(mem, segments[i].vaddr,
+			if (emu_mem_write_bytes(mem, segments[i].vaddr,
 			    (const uint8_t *)buf + segments[i].offset,
-			    segments[i].filesz);
-			if (result != EMU_ELF_OK) {
+			    segments[i].filesz) != EMU_MEM_ACCESS_OK) {
 				free(segments);
-				return (result);
+				return (EMU_ELF_ERR_MEMORY);
 			}
 		}
 
@@ -559,15 +561,14 @@ emu_elf_load_buffer(const void *buf, size_t len, struct emu_guest_mem *mem,
 				return (EMU_ELF_ERR_MEMORY);
 			}
 
-			result = emu_mem_write_bytes(mem,
+			if (emu_mem_write_bytes(mem,
 			    segments[i].vaddr + segments[i].filesz,
-			    zero_buf, bss_size);
-			free(zero_buf);
-
-			if (result != EMU_ELF_OK) {
+			    zero_buf, bss_size) != EMU_MEM_ACCESS_OK) {
+				free(zero_buf);
 				free(segments);
-				return (result);
+				return (EMU_ELF_ERR_MEMORY);
 			}
+			free(zero_buf);
 		}
 	}
 
