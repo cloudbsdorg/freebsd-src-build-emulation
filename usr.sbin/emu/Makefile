@@ -13,6 +13,7 @@ SRCS+=	emu_boot.c
 SRCS+=	emu_decoder.c
 SRCS+=	emu_bhyve.c
 SRCS+=	emu_crash.c
+SRCS+=	emu_share.c
 MAN=	emu.8
 
 WARNS?=	6
