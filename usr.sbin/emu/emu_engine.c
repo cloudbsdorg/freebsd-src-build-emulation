@@ -29,6 +29,7 @@
 #include <sys/capsicum.h>
 #include <sys/capability.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <limits.h>
+#include <time.h>
 
 #include "emu_engine.h"
 #include "emu.h"
@@ -813,4 +815,192 @@ emu_limit_fd_ioctls(int fd, const u_long *cmds, size_t ncmds)
 	}
 
 	return (0);
+}
+
+/*
+ * Execution Control - Instruction Count Limits and Watchdog Timer
+ *
+ * This section implements security controls to prevent guest code from:
+ * - Running infinite loops that hang the emulator
+ * - Consuming excessive CPU time without yielding
+ * - Crashing without detection
+ *
+ * These controls are essential for multi-tenant environments and
+ * for ensuring fair resource allocation.
+ */
+
+/*
+ * Initialize execution state
+ *
+ * Parameters:
+ *   state           - Execution state structure to initialize
+ *   insn_limit      - Maximum instructions per execution slice (0 = unlimited)
+ *   watchdog_timeout - Watchdog timeout in seconds (0 = disabled)
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_exec_state_init(struct emu_exec_state *state, uint64_t insn_limit,
+    time_t watchdog_timeout)
+{
+	if (state == NULL)
+		return (-1);
+
+	memset(state, 0, sizeof(struct emu_exec_state));
+
+	state->insn_count = 0;
+	state->insn_limit = insn_limit;
+	state->total_insns = 0;
+	state->start_time = time(NULL);
+	state->last_activity = state->start_time;
+	state->watchdog_timeout = watchdog_timeout;
+	state->watchdog_enabled = (watchdog_timeout > 0);
+	state->slice_exceeded = false;
+	state->watchdog_triggered = false;
+
+	return (0);
+}
+
+/*
+ * Reset instruction counter for new execution slice
+ *
+ * This is called at the start of each execution slice to allow
+ * the guest to continue running while still enforcing per-slice limits.
+ */
+void
+emu_exec_reset_slice(struct emu_exec_state *state)
+{
+	if (state == NULL)
+		return;
+
+	state->insn_count = 0;
+	state->slice_exceeded = false;
+}
+
+/*
+ * Increment instruction counter and check limit
+ *
+ * Parameters:
+ *   state - Execution state
+ *   count - Number of instructions to add (usually 1)
+ *
+ * Returns:
+ *   0 if within limit
+ *   -1 if limit exceeded
+ */
+int
+emu_exec_insn_increment(struct emu_exec_state *state, uint64_t count)
+{
+	if (state == NULL)
+		return (-1);
+
+	state->insn_count += count;
+	state->total_insns += count;
+
+	/* Check if slice limit exceeded */
+	if (state->insn_limit > 0 && state->insn_count > state->insn_limit) {
+		state->slice_exceeded = true;
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * Check if instruction slice limit has been exceeded
+ *
+ * Returns true if the current execution slice has exceeded the
+ * configured instruction limit.
+ */
+bool
+emu_exec_slice_exceeded(struct emu_exec_state *state)
+{
+	if (state == NULL)
+		return (false);
+
+	return (state->slice_exceeded);
+}
+
+/*
+ * Update last activity timestamp
+ *
+ * This should be called whenever the guest makes progress
+ * (e.g., completes an instruction, handles an interrupt).
+ */
+void
+emu_exec_update_activity(struct emu_exec_state *state)
+{
+	if (state == NULL)
+		return;
+
+	state->last_activity = time(NULL);
+}
+
+/*
+ * Check if watchdog timer has expired
+ *
+ * The watchdog timer detects guest hangs or crashes by monitoring
+ * the time since last guest activity.
+ *
+ * Returns true if the watchdog has expired, false otherwise.
+ */
+bool
+emu_exec_watchdog_expired(struct emu_exec_state *state)
+{
+	time_t now;
+	time_t elapsed;
+
+	if (state == NULL || !state->watchdog_enabled)
+		return (false);
+
+	now = time(NULL);
+	elapsed = now - state->last_activity;
+
+	if (elapsed >= state->watchdog_timeout) {
+		state->watchdog_triggered = true;
+		return (true);
+	}
+
+	return (false);
+}
+
+/*
+ * Get execution statistics
+ *
+ * Parameters:
+ *   state   - Execution state
+ *   total_insns - Output: total instructions executed
+ *   uptime  - Output: execution uptime in seconds
+ */
+void
+emu_exec_get_stats(struct emu_exec_state *state, uint64_t *total_insns,
+    time_t *uptime)
+{
+	time_t now;
+
+	if (state == NULL)
+		return;
+
+	if (total_insns != NULL)
+		*total_insns = state->total_insns;
+
+	if (uptime != NULL) {
+		now = time(NULL);
+		*uptime = now - state->start_time;
+	}
+}
+
+/*
+ * Destroy/reset execution state
+ *
+ * This clears all execution state and can be called when
+ * an instance is destroyed or reset.
+ */
+void
+emu_exec_state_destroy(struct emu_exec_state *state)
+{
+	if (state == NULL)
+		return;
+
+	memset(state, 0, sizeof(struct emu_exec_state));
 }

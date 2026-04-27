@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/capsicum.h>
 #include <sys/capability.h>
+#include <sys/time.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -75,6 +76,26 @@ struct emu_guest_mem {
 	int		num_regions;	/* Number of regions */
 	bool		strict_align;	/* Enforce strict alignment */
 	bool		initialized;	/* Memory subsystem initialized */
+};
+
+/*
+ * Emulator execution state with security controls
+ *
+ * This structure tracks execution state for security features:
+ * - Instruction count limits (prevent infinite loops)
+ * - Watchdog timer (crash detection)
+ * - Execution slice tracking
+ */
+struct emu_exec_state {
+	uint64_t	insn_count;		/* Instructions executed in current slice */
+	uint64_t	insn_limit;		/* Max instructions per slice */
+	uint64_t	total_insns;		/* Total instructions since start */
+	time_t		start_time;		/* Execution start time */
+	time_t		last_activity;		/* Last guest activity timestamp */
+	time_t		watchdog_timeout;	/* Watchdog timeout in seconds */
+	bool		watchdog_enabled;	/* Watchdog timer enabled */
+	bool		slice_exceeded;		/* Instruction slice exceeded */
+	bool		watchdog_triggered;	/* Watchdog timeout triggered */
 };
 
 /*
@@ -142,6 +163,39 @@ int emu_limit_fd_ioctls(int fd, const u_long *cmds, size_t ncmds);
 
 /* Check if FD is essential (kept open during sandboxing) */
 bool emu_is_essential_fd(int fd);
+
+/*
+ * Execution control - Instruction count limits and watchdog timer
+ *
+ * These functions implement security controls to prevent guest code
+ * from hanging the emulator or consuming excessive resources.
+ */
+
+/* Initialize execution state */
+int emu_exec_state_init(struct emu_exec_state *state, uint64_t insn_limit,
+    time_t watchdog_timeout);
+
+/* Reset instruction counter for new slice */
+void emu_exec_reset_slice(struct emu_exec_state *state);
+
+/* Increment instruction counter and check limit */
+int emu_exec_insn_increment(struct emu_exec_state *state, uint64_t count);
+
+/* Check if instruction slice exceeded */
+bool emu_exec_slice_exceeded(struct emu_exec_state *state);
+
+/* Update last activity timestamp */
+void emu_exec_update_activity(struct emu_exec_state *state);
+
+/* Check if watchdog timer expired */
+bool emu_exec_watchdog_expired(struct emu_exec_state *state);
+
+/* Get execution statistics */
+void emu_exec_get_stats(struct emu_exec_state *state, uint64_t *total_insns,
+    time_t *uptime);
+
+/* Reset execution state */
+void emu_exec_state_destroy(struct emu_exec_state *state);
 
 /*
  * Inline helpers for performance-critical paths
