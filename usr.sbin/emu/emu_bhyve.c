@@ -26,6 +26,8 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/capsicum.h>
+#include <sys/capability.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -374,6 +376,126 @@ emu_bhyve_vm_destroy(struct emu_bhyve_state *state)
 
 	/* Clear state */
 	memset(state, 0, sizeof(struct emu_bhyve_state));
+
+	return (0);
+}
+
+/*
+ * Check if a file descriptor is essential for bhyve operation
+ * Essential FDs are kept open during sandboxing
+ */
+bool
+emu_bhyve_is_essential_fd(int fd)
+{
+	/* Stdio streams are always essential */
+	if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
+		return (true);
+
+	/* VMM and vCPU FDs would be essential, but we can't check them here
+	 * as we don't have access to the state structure. Callers should
+	 * handle those separately before calling sandbox functions.
+	 */
+	return (false);
+}
+
+/*
+ * Limit rights on VMM file descriptor using Capsicum
+ *
+ * This function restricts the operations that can be performed
+ * on the VMM file descriptor to only what's needed for VM operation.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_bhyve_limit_vmm_rights(int vmm_fd)
+{
+	cap_rights_t rights;
+	int error;
+
+	if (vmm_fd < 0)
+		return (-1);
+
+	/* Limit rights to only what bhyve needs:
+	 * - CAP_READ/WRITE: for VM memory access
+	 * - CAP_IOCTL: for VM control operations
+	 * - CAP_MMAP: for mapping VM memory
+	 */
+	cap_rights_init(&rights, CAP_READ, CAP_WRITE, CAP_IOCTL, CAP_MMAP);
+
+	error = cap_rights_limit(vmm_fd, &rights);
+	if (error != 0) {
+		warn("cap_rights_limit() failed on VMM fd %d", vmm_fd);
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * Limit ioctl operations on VMM file descriptor
+ *
+ * This function restricts which ioctl commands can be issued
+ * on the VMM file descriptor.
+ *
+ * Note: In a real implementation, this would list specific VM ioctls.
+ * For now, we allow all ioctls as the specific ioctl numbers depend
+ * on the VMM implementation.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_bhyve_limit_vmm_ioctls(int vmm_fd)
+{
+	/* In a production implementation, we would limit to specific ioctls:
+	 * - VM_RUN, VM_STOP, VM_SUSPEND, VM_RESUME
+	 * - VM_GET_REGISTER, VM_SET_REGISTER
+	 * - VM_INTR, VM_NMI
+	 * - etc.
+	 *
+	 * For now, we don't limit ioctls as the specific numbers
+	 * are defined in machine/vmm.h and vary by architecture.
+	 */
+	return (0);
+}
+
+/*
+ * Enter Capsicum capability mode sandbox for bhyve process
+ *
+ * This function restricts the bhyve process to only access
+ * pre-limited file descriptors. After this function returns,
+ * the process cannot:
+ * - Open new files or network connections
+ * - Access arbitrary filesystem paths
+ * - Execute new binaries
+ * - Fork new processes
+ * - Access /proc, /sys, or other sensitive paths
+ *
+ * This should be called immediately after VM creation and
+ * privilege dropping.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_bhyve_enter_sandbox(void)
+{
+	int error;
+
+	/*
+	 * Enter capability mode
+	 * After this call, the process can only access file descriptors
+	 * that were already open and have appropriate rights
+	 */
+	error = cap_enter();
+	if (error != 0) {
+		warn("cap_enter() failed for bhyve process");
+		return (-1);
+	}
+
+	/* Verify we're in capability mode */
+	if (cap_sandboxed() == 0) {
+		warnx("Failed to enter capability mode for bhyve process");
+		return (-1);
+	}
 
 	return (0);
 }

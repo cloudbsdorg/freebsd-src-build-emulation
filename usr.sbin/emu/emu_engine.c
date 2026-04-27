@@ -26,6 +26,9 @@
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/capsicum.h>
+#include <sys/capability.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +36,9 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <err.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <limits.h>
 
 #include "emu_engine.h"
 #include "emu.h"
@@ -49,6 +55,21 @@
  * - Region permissions are enforced (read-only, execute-only, etc.)
  * - MMIO regions are handled separately from normal memory
  * - Alignment checks can be enabled for stricter validation
+ * - Capsicum sandboxing limits file descriptor rights after initialization
+ */
+
+/*
+ * Capsicum Sandbox Implementation
+ *
+ * This section implements Capsicum capability mode sandboxing for the
+ * custom emulator. After initialization, the emulator enters capability
+ * mode where it can only access pre-limited file descriptors.
+ *
+ * Security benefits:
+ * - Even if emulator is compromised, attacker cannot access arbitrary files
+ * - Network access is restricted to pre-opened sockets
+ * - Cannot execute new binaries or fork processes
+ * - Cannot access /proc, /sys, or other sensitive paths
  */
 
 /* Convert memory access result to string for debugging */
@@ -657,4 +678,139 @@ emu_mem_dump_regions(struct emu_guest_mem *mem)
 		    i, region->name ? region->name : "unknown",
 		    (unsigned long)region->base, region->size, region->flags);
 	}
+}
+
+/*
+ * Check if a file descriptor is essential for emulator operation
+ * Essential FDs are kept open during sandboxing
+ */
+static bool
+emu_is_essential_fd(int fd)
+{
+	/* Stdio streams are always essential */
+	if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
+		return (true);
+
+	/* Add other essential FDs here as needed */
+	/* For now, only stdio is considered essential */
+	return (false);
+}
+
+/*
+ * Close non-essential file descriptors
+ * This is called before entering Capsicum sandbox to minimize
+ * the attack surface.
+ */
+static void
+emu_close_nonessential_fds(void)
+{
+	int fd;
+
+	/* Close all FDs from 3 to OPEN_MAX (except essential ones) */
+	for (fd = 3; fd < OPEN_MAX; fd++) {
+		if (!emu_is_essential_fd(fd))
+			(void)close(fd);
+	}
+}
+
+/*
+ * Enter Capsicum capability mode sandbox
+ *
+ * This function restricts the emulator process to only access
+ * pre-limited file descriptors. After this function returns,
+ * the process cannot:
+ * - Open new files or network connections
+ * - Access arbitrary filesystem paths
+ * - Execute new binaries
+ * - Fork new processes
+ * - Access /proc, /sys, or other sensitive paths
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_enter_sandbox(void)
+{
+	cap_rights_t rights;
+	int error;
+
+	/* Close non-essential file descriptors first */
+	emu_close_nonessential_fds();
+
+	/*
+	 * Enter capability mode
+	 * After this call, the process can only access file descriptors
+	 * that were already open and have appropriate rights
+	 */
+	error = cap_enter();
+	if (error != 0) {
+		warn("cap_enter() failed");
+		return (-1);
+	}
+
+	/* Verify we're in capability mode */
+	if (cap_sandboxed() == 0) {
+		warnx("Failed to enter capability mode");
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * Limit rights on a file descriptor using Capsicum
+ *
+ * This function restricts the operations that can be performed
+ * on a specific file descriptor.
+ *
+ * Parameters:
+ *   fd     - File descriptor to limit
+ *   rights - Capabilities to allow (e.g., CAP_READ | CAP_WRITE)
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_limit_fd_rights(int fd, cap_rights_t *rights)
+{
+	int error;
+
+	if (fd < 0 || rights == NULL)
+		return (-1);
+
+	error = cap_rights_limit(fd, rights);
+	if (error != 0) {
+		warn("cap_rights_limit() failed on fd %d", fd);
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * Limit ioctl operations on a file descriptor
+ *
+ * This function restricts which ioctl commands can be issued
+ * on a specific file descriptor.
+ *
+ * Parameters:
+ *   fd     - File descriptor to limit
+ *   cmds   - Array of allowed ioctl commands
+ *   ncmds  - Number of commands in the array
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_limit_fd_ioctls(int fd, const u_long *cmds, size_t ncmds)
+{
+	int error;
+
+	if (fd < 0 || cmds == NULL || ncmds == 0)
+		return (-1);
+
+	error = cap_ioctls_limit(fd, cmds, ncmds);
+	if (error != 0) {
+		warn("cap_ioctls_limit() failed on fd %d", fd);
+		return (-1);
+	}
+
+	return (0);
 }
