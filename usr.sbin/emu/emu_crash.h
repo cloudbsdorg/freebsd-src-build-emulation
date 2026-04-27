@@ -78,6 +78,8 @@ struct emu_crash_state {
 	char			log[EMU_CRASH_LOG_MAX];	/* Crash log */
 	size_t			log_len;	/* Log length */
 	bool			captured;	/* State captured flag */
+	bool			enabled;	/* Crash detection enabled */
+	bool			contained;	/* Crash containment active */
 };
 
 /* Crash capture context */
@@ -97,6 +99,9 @@ int emu_crash_init(void);
 
 /* Enable crash detection for instance */
 int emu_crash_enable(struct emu_crash_context *ctx);
+
+/* Signal handler for crash detection */
+void emu_crash_signal_handler(int sig);
 
 /* Disable crash detection for instance */
 int emu_crash_disable(struct emu_crash_context *ctx);
