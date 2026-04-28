@@ -132,6 +132,10 @@ int	emu_check_access(struct thread *td, uint64_t inst_id, int perm);
 int	emu_check_create(struct thread *td);
 int	emu_check_destroy(struct thread *td, uint64_t inst_id);
 
+/* Securelevel integration */
+int	emu_securelevel_check(struct thread *td, int level);
+int	emu_securelevel_restricted_op(struct thread *td, const char *op);
+
 /* Stack capture interface */
 void	emu_stack_init(void);
 void	emu_stack_destroy(void);
