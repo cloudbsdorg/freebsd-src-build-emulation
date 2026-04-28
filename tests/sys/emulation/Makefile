@@ -32,7 +32,7 @@ TESTSDIR=	${TESTSBASE}/sys/emulation
 BINDIR=		${TESTSDIR}
 
 ATF_TESTS_SH+=	module_test acl_test security_test
-ATF_TESTS_C+=	fuzz_decoder
+ATF_TESTS_C+=	fuzz_decoder audit_test
 
 ${PACKAGE}FILES+=	utils.subr
 
