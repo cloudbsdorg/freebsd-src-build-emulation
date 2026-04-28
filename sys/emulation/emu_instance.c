@@ -53,6 +53,7 @@
 #include "emu.h"
 #include "emu_smp.h"
 #include "emu_audit.h"
+#include "emu_securelevel.h"
 
 /*
  * Instance resource limits
@@ -379,6 +380,13 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 	struct emu_instance *inst;
 	int error;
 
+	/* Check securelevel restrictions (S9.1) */
+	error = emu_securelevel_restricted_op(curthread, "instance_create");
+	if (error != 0) {
+		log(LOG_WARNING, "emu: instance creation restricted by securelevel\n");
+		return (error);
+	}
+
 	mtx_lock(&emu_instance_lock);
 
 	/* Check if name already exists */
@@ -479,6 +487,14 @@ int
 emu_instance_destroy(uint64_t inst_id)
 {
 	struct emu_instance *inst;
+	int error;
+
+	/* Check securelevel restrictions (S9.1) */
+	error = emu_securelevel_restricted_op(curthread, "instance_destroy");
+	if (error != 0) {
+		log(LOG_WARNING, "emu: instance destruction restricted by securelevel\n");
+		return (error);
+	}
 
 	mtx_lock(&emu_instance_lock);
 

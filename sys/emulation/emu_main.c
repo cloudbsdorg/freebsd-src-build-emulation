@@ -46,6 +46,7 @@ MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
 void emu_sysctl_init(void);
 void emu_sysctl_destroy(void);
 void emu_instance_init(void);
+void emu_instance_cleanup(void);
 void emu_stack_init(void);
 void emu_stack_destroy(void);
 int emu_audit_init(void);
