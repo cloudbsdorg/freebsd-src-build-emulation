@@ -38,7 +38,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/priv.h>
 #include <sys/malloc.h>
 #include <sys/ucred.h>
+#include <sys/syslog.h>
 #include "emu.h"
+#include "emu_securelevel.h"
 
 /*
  * Forward declaration of sysctl node from emu_main.c
@@ -87,6 +89,15 @@ sysctl_emu_allow_nonroot(SYSCTL_HANDLER_ARGS)
 	error = sysctl_handle_int(oidp, &newval, 0, req);
 	if (error != 0 || req->newptr == NULL)
 		return (error);
+
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
 
 	/* Only root can change this setting */
 	if (priv_check(curthread, 0) != 0)

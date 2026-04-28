@@ -53,6 +53,8 @@
 
 #include "emu.h"
 #include "emu_memmgmt.h"
+#include "emu_securelevel.h"
+#include <sys/syslog.h>
 
 /* Default values */
 #define EMU_MEM_POLICY_DEFAULT		EMU_MEM_POLICY_PREALLOC
@@ -221,6 +223,15 @@ emu_memmgmt_sysctl_policy(SYSCTL_HANDLER_ARGS)
 	if (newval != EMU_MEM_POLICY_PREALLOC && newval != EMU_MEM_POLICY_DEMAND)
 		return (EINVAL);
 
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
+
 	mtx_lock(&emu_memmgmt.mms_lock);
 	emu_memmgmt.mms_policy = newval;
 	mtx_unlock(&emu_memmgmt.mms_lock);
@@ -240,6 +251,15 @@ emu_memmgmt_sysctl_overcommit(SYSCTL_HANDLER_ARGS)
 
 	if (newval < 0 || newval > 1)
 		return (EINVAL);
+
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
 
 	mtx_lock(&emu_memmgmt.mms_lock);
 	emu_memmgmt.mms_overcommit = newval;
@@ -261,6 +281,15 @@ emu_memmgmt_sysctl_warn_percent(SYSCTL_HANDLER_ARGS)
 	if (newval < 50 || newval > 100)
 		return (EINVAL);
 
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
+
 	mtx_lock(&emu_memmgmt.mms_lock);
 	emu_memmgmt.mms_warn_percent = newval;
 	mtx_unlock(&emu_memmgmt.mms_lock);
@@ -280,6 +309,15 @@ emu_memmgmt_sysctl_balloon_min_pct(SYSCTL_HANDLER_ARGS)
 
 	if (newval < 10 || newval > 90)
 		return (EINVAL);
+
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
 
 	mtx_lock(&emu_memmgmt.mms_lock);
 	emu_memmgmt.mms_balloon_min_pct = newval;
@@ -301,6 +339,15 @@ emu_memmgmt_sysctl_balloon_interval(SYSCTL_HANDLER_ARGS)
 	if (newval < 5 || newval > 300)
 		return (EINVAL);
 
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
+
 	mtx_lock(&emu_memmgmt.mms_lock);
 	emu_memmgmt.mms_balloon_interval = newval;
 	mtx_unlock(&emu_memmgmt.mms_lock);
@@ -320,6 +367,15 @@ emu_memmgmt_sysctl_system_reserve(SYSCTL_HANDLER_ARGS)
 
 	if (newval < 5 || newval > 50)
 		return (EINVAL);
+
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
 
 	mtx_lock(&emu_memmgmt.mms_lock);
 	emu_memmgmt.mms_system_reserve_pct = newval;
