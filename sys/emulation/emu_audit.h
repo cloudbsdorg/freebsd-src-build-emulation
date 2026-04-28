@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/priv.h>
+#include <sys/syslog.h>
 
 /*
  * Emulation Framework Audit Logging Subsystem

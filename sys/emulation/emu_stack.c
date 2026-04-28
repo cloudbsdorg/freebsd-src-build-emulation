@@ -37,8 +37,15 @@ __FBSDID("$FreeBSD$");
 #include <sys/sbuf.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
+#include <sys/time.h>
+#include <sys/malloc.h>
 
 #include "emu.h"
+
+/*
+ * Forward declaration of sysctl node from emu_main.c
+ */
+SYSCTL_DECL(_kern_emulation);
 
 /*
  * Emulation Framework Stack Capture Interface
@@ -198,7 +205,7 @@ emu_stack_get(uint64_t inst_id, struct sbuf *sb)
 
 	if (!sc->sc_valid) {
 		mtx_unlock(&sc->sc_lock);
-		return (ENODATA);
+		return (ENOENT);
 	}
 
 	/* Output stack trace in structured format */
@@ -240,7 +247,7 @@ sysctl_emu_instance_stack(SYSCTL_HANDLER_ARGS)
 	int error;
 
 	/* Parse instance ID from OID */
-	inst_id = arg1;
+	inst_id = (uint64_t)(uintptr_t)arg1;
 
 	if (inst_id >= MAXEMUINSTANCES)
 		return (EINVAL);
@@ -251,7 +258,7 @@ sysctl_emu_instance_stack(SYSCTL_HANDLER_ARGS)
 
 	if (!sc->sc_valid) {
 		mtx_unlock(&sc->sc_lock);
-		return (ENODATA);
+		return (ENOENT);
 	}
 
 	/* Copy stack data to userland */

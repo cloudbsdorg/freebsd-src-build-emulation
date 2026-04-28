@@ -39,7 +39,7 @@
 /*
  * vCPU state enumeration
  */
-enum emu_vcpu_state {
+enum emu_vcpu_status {
 	EMU_VCPU_STOPPED = 0,
 	EMU_VCPU_RUNNING,
 	EMU_VCPU_PAUSED,
@@ -61,7 +61,7 @@ struct emu_host_topology {
  */
 struct emu_vcpu_state {
 	int			vcpu_id;	/* vCPU index (0..num_vcpus-1) */
-	enum emu_vcpu_state	state;		/* vCPU state */
+	enum emu_vcpu_status	state;		/* vCPU state */
 	int			socket_id;	/* Socket ID */
 	int			core_id;	/* Core ID within socket */
 	int			thread_id;	/* Thread ID within core */
@@ -100,7 +100,7 @@ int	emu_vcpu_start(struct emu_vcpu_state *vcpu);
 int	emu_vcpu_stop(struct emu_vcpu_state *vcpu);
 
 /* Utility functions */
-const char *emu_vcpu_state_str(enum emu_vcpu_state state);
+const char *emu_vcpu_state_str(enum emu_vcpu_status state);
 
 /* Sysctl interface */
 void	emu_smp_sysctl_init(void);

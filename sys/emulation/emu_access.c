@@ -35,8 +35,8 @@ __FBSDID("$FreeBSD$");
 #include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/ucred.h>
-#include <sys/group.h>
 #include <sys/jail.h>
+#include <sys/malloc.h>
 
 #include "emu.h"
 #include "emu_audit.h"
@@ -66,18 +66,15 @@ extern int emu_allow_nonroot;
 int
 emu_check_priv(struct thread *td, int priv)
 {
-	int error;
-
 	/* Root always has all privileges */
-	if (priv_check(td, PRIV_ROOT) == 0)
+	if (priv_check(td, 0) == 0)
 		return (0);
 
 	/* Check for specific emulation privilege */
-	error = priv_check(td, priv);
-	if (error == 0)
+	if (priv_check(td, priv) == 0)
 		return (0);
 
-	return (error);
+	return (EPERM);
 }
 
 /*
@@ -96,9 +93,7 @@ int
 emu_check_access(struct thread *td, uint64_t inst_id, int perm)
 {
 	struct ucred *cred;
-	struct emu_instance *inst;
 	uid_t uid;
-	int error;
 
 	cred = td->td_ucred;
 	uid = cred->cr_uid;
@@ -119,26 +114,12 @@ emu_check_access(struct thread *td, uint64_t inst_id, int perm)
 		return (0);
 
 	/* Check if user is in emu group */
-	error = groupmember(GID_EMU, cred);
-	if (error == 0) {
-		/* User is in emu group, allow access */
+	if (groupmember(GID_EMU, cred))
 		return (0);
-	}
 
 	/* Check if user owns the instance */
-	mtx_lock(&emu_instance_lock);
-	inst = emu_find_instance(inst_id);
-	if (inst == NULL) {
-		mtx_unlock(&emu_instance_lock);
-		return (ENOENT);
-	}
-
-	if (inst->inst_uid == uid) {
-		/* User owns this instance */
-		mtx_unlock(&emu_instance_lock);
+	if (emu_check_instance_ownership(td, inst_id) == 0)
 		return (0);
-	}
-	mtx_unlock(&emu_instance_lock);
 
 	/* Access denied */
 	AUDIT_PERM_DENIED("instance_access", "not owner, not in emu group, not root");
@@ -194,7 +175,6 @@ int
 emu_check_destroy(struct thread *td, uint64_t inst_id)
 {
 	struct ucred *cred;
-	struct emu_instance *inst;
 	uid_t uid;
 	int error;
 
@@ -214,19 +194,11 @@ emu_check_destroy(struct thread *td, uint64_t inst_id)
 		return (0);
 
 	/* Check instance ownership */
-	mtx_lock(&emu_instance_lock);
-	inst = emu_find_instance(inst_id);
-	if (inst == NULL) {
-		mtx_unlock(&emu_instance_lock);
-		return (ENOENT);
-	}
-
-	if (inst->inst_uid == uid) {
+	error = emu_check_instance_ownership(td, inst_id);
+	if (error == 0) {
 		/* Owner can destroy their own instance */
-		mtx_unlock(&emu_instance_lock);
 		return (0);
 	}
-	mtx_unlock(&emu_instance_lock);
 
 	AUDIT_PERM_DENIED("instance_destroy", "not root, no PRIV_EMU_DESTROY, not owner");
 	return (EPERM);

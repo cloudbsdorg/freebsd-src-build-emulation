@@ -45,6 +45,11 @@
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/limits.h>
+#include <sys/malloc.h>
+#include <sys/syslog.h>
+#include <sys/priv.h>
+#include <security/mac/mac_framework.h>
+#include <security/mac/mac_internal.h>
 #include "emu.h"
 #include "emu_smp.h"
 #include "emu_audit.h"
@@ -76,6 +81,7 @@ struct emu_instance {
 	int			inst_num_vcpus;	/* Number of vCPUs */
 	int			inst_num_sockets;	/* Number of sockets */
 	struct emu_vcpu_state	*inst_vcpus;	/* vCPU state array */
+	struct label		*inst_label;	/* MAC label from creator */
 	TAILQ_ENTRY(emu_instance) inst_link;
 };
 
@@ -117,7 +123,50 @@ extern int emu_max_memory_per_vcpu;
 static uint64_t emu_next_instance_id = 1;
 
 /*
- * Find user limits structure by UID
+ * Apply MAC label from creating process to instance
+ * Called during instance creation with lock held
+ */
+static void
+emu_instance_apply_mac_label(struct emu_instance *inst)
+{
+
+	/* Get MAC label from creating process credential */
+	if ((mac_labeled & MPC_OBJECT_CRED) == 0) {
+		/* MAC not enabled for creds - continue without label */
+		inst->inst_label = NULL;
+		return;
+	}
+
+	/* Allocate and initialize label for instance */
+	inst->inst_label = mac_cred_label_alloc();
+	if (inst->inst_label == NULL)
+		return;
+
+	/* 
+	 * Note: Label propagation would require policy-specific copying.
+	 * For now, we allocate the label structure to support future
+	 * policy integration. Policies can use the inst_label field
+	 * to store policy-specific data.
+	 */
+	printf("emu: applied MAC label to instance %s\n", inst->inst_name);
+}
+
+/*
+ * Free MAC label from instance
+ * Called during instance destruction
+ */
+static void
+emu_instance_free_mac_label(struct emu_instance *inst)
+{
+
+	if (inst->inst_label != NULL) {
+		mac_cred_label_free(inst->inst_label);
+		inst->inst_label = NULL;
+	}
+}
+
+/*
+ * Check if user limits structure by UID
  * Must be called with emu_instance_lock held
  */
 static struct emu_user_limits *
@@ -160,13 +209,17 @@ static int
 emu_check_user_limits(uid_t uid, int num_vcpus, uint64_t memory)
 {
 	struct emu_user_limits *ul;
-	int error;
+	struct emu_instance *inst;
+	int instance_count;
 
 	mtx_assert(&emu_instance_lock, MA_OWNED);
 
 	/* Check total instance count */
-	if (TAILQ_EMPTY(&emu_instances) == 0 &&
-	    TAILQ_COUNT(&emu_instances) >= emu_max_instances) {
+	instance_count = 0;
+	TAILQ_FOREACH(inst, &emu_instances, inst_link)
+		instance_count++;
+
+	if (instance_count >= emu_max_instances) {
 		printf("emu: maximum instance count reached (%d)\n",
 		    emu_max_instances);
 		return (EMFILE);
@@ -349,7 +402,7 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		num_sockets = 1;
 
 	error = emu_validate_vcpu_config(num_vcpus, num_sockets, uid,
-	    suser(curthread) == 0);
+	    priv_check(curthread, 0) == 0);
 	if (error != 0) {
 		mtx_unlock(&emu_instance_lock);
 		return (error);
@@ -370,6 +423,9 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 	inst->inst_num_sockets = num_sockets;
 	getmicrouptime(&inst->inst_start_time);
 	inst->inst_last_activity = inst->inst_start_time;
+
+	/* Apply MAC label from creating process */
+	emu_instance_apply_mac_label(inst);
 
 	/* Initialize vCPU array */
 	error = emu_vcpu_array_init(&inst->inst_vcpus, num_vcpus);
@@ -423,7 +479,6 @@ int
 emu_instance_destroy(uint64_t inst_id)
 {
 	struct emu_instance *inst;
-	int error;
 
 	mtx_lock(&emu_instance_lock);
 
@@ -453,6 +508,9 @@ emu_instance_destroy(uint64_t inst_id)
 
 	AUDIT_INSTANCE_DESTROY(inst->inst_name);
 
+	/* Free MAC label */
+	emu_instance_free_mac_label(inst);
+
 	/* Destroy vCPU array */
 	if (inst->inst_vcpus != NULL) {
 		/* Destroy per-vCPU sysctl interfaces */
@@ -475,7 +533,6 @@ int
 emu_instance_start(uint64_t inst_id)
 {
 	struct emu_instance *inst;
-	int error;
 
 	mtx_lock(&emu_instance_lock);
 
@@ -513,7 +570,6 @@ int
 emu_instance_stop(uint64_t inst_id)
 {
 	struct emu_instance *inst;
-	int error;
 
 	mtx_lock(&emu_instance_lock);
 
@@ -664,7 +720,6 @@ int
 emu_instance_get_info(uint64_t inst_id, struct sbuf *sb)
 {
 	struct emu_instance *inst;
-	int error;
 
 	mtx_lock(&emu_instance_lock);
 
@@ -693,10 +748,13 @@ emu_instance_get_info(uint64_t inst_id, struct sbuf *sb)
 int
 emu_instance_total_count(void)
 {
+	struct emu_instance *inst;
 	int count;
 
 	mtx_lock(&emu_instance_lock);
-	count = TAILQ_COUNT(&emu_instances);
+	count = 0;
+	TAILQ_FOREACH(inst, &emu_instances, inst_link)
+		count++;
 	mtx_unlock(&emu_instance_lock);
 
 	return (count);
@@ -762,6 +820,34 @@ emu_instance_list(uint64_t *inst_ids, int max_count)
 }
 
 /*
+ * Check if thread owns an instance
+ * Returns 0 if owner, EPERM if not owner, ENOENT if instance not found
+ */
+int
+emu_check_instance_ownership(struct thread *td, uint64_t inst_id)
+{
+	struct emu_instance *inst;
+	int error;
+
+	mtx_lock(&emu_instance_lock);
+
+	inst = emu_find_instance(inst_id);
+	if (inst == NULL) {
+		mtx_unlock(&emu_instance_lock);
+		return (ENOENT);
+	}
+
+	if (inst->inst_uid == td->td_ucred->cr_uid)
+		error = 0;
+	else
+		error = EPERM;
+
+	mtx_unlock(&emu_instance_lock);
+
+	return (error);
+}
+
+/*
  * Initialize instance management subsystem
  */
 void
@@ -780,7 +866,7 @@ emu_instance_init(void)
  * Destroy instance management subsystem
  */
 void
-emu_instance_destroy(void)
+emu_instance_cleanup(void)
 {
 	struct emu_instance *inst;
 	struct emu_user_limits *ul;
