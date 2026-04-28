@@ -52,6 +52,7 @@
 #include <sys/smp.h>
 #include <sys/sysctl.h>
 #include <sys/cpuinfo.h>
+#include <sys/syslog.h>
 
 #include "emulation/emu.h"
 #include "emulation/emu_smp.h"
@@ -340,7 +341,7 @@ emu_vcpu_stop(struct emu_vcpu_state *vcpu)
  * Get vCPU state as string
  */
 const char *
-emu_vcpu_state_str(enum emu_vcpu_state state)
+emu_vcpu_state_str(enum emu_vcpu_status state)
 {
 
 	switch (state) {

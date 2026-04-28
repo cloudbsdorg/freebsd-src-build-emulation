@@ -38,7 +38,6 @@
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/uio.h>
-#include <sys/vnode.h>
 #include <sys/file.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
@@ -48,6 +47,9 @@
 #include <sys/lock.h>
 #include <sys/refcount.h>
 #include <sys/sbuf.h>
+#include <sys/time.h>
+#include <sys/timetc.h>
+#include <sys/clock.h>
 
 #include <machine/stdarg.h>
 
@@ -55,12 +57,38 @@
 #include "emu_audit.h"
 
 /*
- * Emulation Framework Audit Logging Implementation
- * 
- * Provides comprehensive audit logging for all security-relevant events
- * in the emulation framework. Supports multiple output destinations
- * (syslog, file) with configurable rotation and filtering.
+ * Forward declarations
  */
+static int emu_audit_write_syslog(struct emu_audit_record *rec);
+static int emu_audit_write_file(struct emu_audit_record *rec);
+static int emu_audit_rotate_file(void);
+static int emu_audit_check_rotation(void);
+static void emu_audit_format_message(struct emu_audit_record *rec, char *buf, size_t len);
+
+/*
+ * Internal helper functions
+ */
+static void
+emu_audit_format_message(struct emu_audit_record *rec, char *buf, size_t len)
+{
+	struct timespec ts;
+	time_t t;
+	struct tm tm;
+
+	t = rec->ar_timestamp.tv_sec;
+	localtime_r(&t, &tm);
+	ts = rec->ar_timestamp;
+
+	snprintf(buf, len,
+	    "[%04d-%02d-%02d %02d:%02d:%02d.%03ld] [%s] [%s] %s: %s",
+	    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+	    tm.tm_hour, tm.tm_min, tm.tm_sec,
+	    (long)ts.tv_nsec / 1000000,
+	    emu_audit_severity_str(rec->ar_severity),
+	    rec->ar_event_type,
+	    rec->ar_subject,
+	    rec->ar_message);
+}
 
 /* Global audit state */
 static struct emu_audit_state g_audit_state;
@@ -68,13 +96,6 @@ static struct emu_audit_state g_audit_state;
 /* Sysctl context */
 static struct sysctl_ctx_list emu_audit_sysctl_ctx;
 static struct sysctl_oid *emu_audit_sysctl_tree;
-
-/* Forward declarations */
-static int emu_audit_write_syslog(struct emu_audit_record *rec);
-static int emu_audit_write_file(struct emu_audit_record *rec);
-static int emu_audit_rotate_file(void);
-static int emu_audit_check_rotation(void);
-static void emu_audit_format_message(struct emu_audit_record *rec, char *buf, size_t len);
 
 /*
  * Initialize the audit logging subsystem

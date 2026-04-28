@@ -36,8 +36,14 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/sbuf.h>
 #include <sys/priv.h>
-
+#include <sys/malloc.h>
+#include <sys/ucred.h>
 #include "emu.h"
+
+/*
+ * Forward declaration of sysctl node from emu_main.c
+ */
+SYSCTL_DECL(_kern_emulation);
 
 /*
  * Emulation Framework Sysctl Interface
@@ -83,7 +89,7 @@ sysctl_emu_allow_nonroot(SYSCTL_HANDLER_ARGS)
 		return (error);
 
 	/* Only root can change this setting */
-	if (priv_check(curthread, PRIV_ROOT) != 0)
+	if (priv_check(curthread, 0) != 0)
 		return (EPERM);
 
 	emu_allow_nonroot = newval;
@@ -223,7 +229,6 @@ sysctl_kern_emulation_module(SYSCTL_HANDLER_ARGS)
 	int field = arg2;
 	int val;
 	char buf[32];
-	int error;
 
 	mtx_lock(&emu_module_lock);
 	TAILQ_FOREACH(eme, &emu_module_list, link) {
@@ -256,15 +261,7 @@ sysctl_kern_emulation_module(SYSCTL_HANDLER_ARGS)
 void
 emu_sysctl_register_module(const char *name)
 {
-	static struct sysctl_ctx_list ctx;
-	static struct sysctl_oid_list child_list;
-	static int initialized = 0;
 	struct sysctl_oid *oid;
-
-	if (!initialized) {
-		SYSCTL_INIT_LIST(&child_list);
-		initialized = 1;
-	}
 
 	/* Create kern.emulation.module.<name> node */
 	oid = SYSCTL_ADD_NODE(NULL, SYSCTL_STATIC_CHILDREN(_kern_emulation),

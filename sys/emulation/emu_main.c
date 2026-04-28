@@ -38,6 +38,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/lock.h>
 #include <sys/ucred.h>
+#include "emu.h"
 
 MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
 
@@ -45,7 +46,6 @@ MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
 void emu_sysctl_init(void);
 void emu_sysctl_destroy(void);
 void emu_instance_init(void);
-void emu_instance_destroy(void);
 void emu_stack_init(void);
 void emu_stack_destroy(void);
 int emu_audit_init(void);
@@ -76,7 +76,7 @@ MODULE_VERSION(emu_core, EMU_CORE_VERSION);
  * Instance Registry
  */
 static struct mtx emu_instance_lock;
-static int emu_instance_count = 0;
+static int emu_num_instances = 0;
 
 /*
  * Sysctl OID tree for emulation framework
@@ -88,21 +88,21 @@ static SYSCTL_NODE(_kern, OID_AUTO, emulation, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
  * kern.emulation.instance_count - Number of active emulation instances
  */
 SYSCTL_INT(_kern_emulation, OID_AUTO, instance_count, CTLFLAG_RD,
-    &emu_instance_count, 0, "Number of active emulation instances");
+    &emu_num_instances, 0, "Number of active emulation instances");
 
 /*
- * emu_instance_count() - Get current instance count
+ * emu_get_instance_count() - Get current instance count
  *
  * Returns the number of active emulation instances.
  * Thread-safe, uses mutex protection.
  */
 int
-emu_instance_count(void)
+emu_get_instance_count(void)
 {
 	int count;
 
 	mtx_lock(&emu_instance_lock);
-	count = emu_instance_count;
+	count = emu_num_instances;
 	mtx_unlock(&emu_instance_lock);
 
 	return (count);
@@ -120,11 +120,11 @@ emu_instance_register(void)
 	int error;
 
 	mtx_lock(&emu_instance_lock);
-	if (emu_instance_count >= MAXEMUINSTANCES) {
+	if (emu_num_instances >= MAXEMUINSTANCES) {
 		mtx_unlock(&emu_instance_lock);
 		return (EBUSY);
 	}
-	emu_instance_count++;
+	emu_num_instances++;
 	error = 0;
 	mtx_unlock(&emu_instance_lock);
 
@@ -143,8 +143,8 @@ emu_instance_deregister(void)
 {
 
 	mtx_lock(&emu_instance_lock);
-	if (emu_instance_count > 0)
-		emu_instance_count--;
+	if (emu_num_instances > 0)
+		emu_num_instances--;
 	mtx_unlock(&emu_instance_lock);
 }
 
@@ -175,7 +175,7 @@ emu_core_modevent(module_t mod, int type, void *data)
 	case MOD_LOAD:
 		/* Initialize instance registry */
 		mtx_init(&emu_instance_lock, "emu_instance", NULL, MTX_DEF);
-		emu_instance_count = 0;
+		emu_num_instances = 0;
 
 		/* Initialize sysctl infrastructure */
 		emu_sysctl_init();
@@ -210,16 +210,17 @@ emu_core_modevent(module_t mod, int type, void *data)
 	case MOD_UNLOAD:
 		/* Refuse unload if active instances */
 		mtx_lock(&emu_instance_lock);
-		if (emu_instance_count > 0) {
+		if (emu_num_instances > 0) {
 			mtx_unlock(&emu_instance_lock);
 			printf("emu_core: Cannot unload with %d active "
-			    "instance(s)\n", emu_instance_count);
+			    "instance(s)\n", emu_get_instance_count());
 			return (EBUSY);
 		}
 		mtx_unlock(&emu_instance_lock);
 
 		/* Clean up instance management subsystem */
-		emu_instance_destroy();
+		/* Note: instances should be destroyed by userland before unload */
+		emu_instance_cleanup();
 
 		/* Clean up stack capture infrastructure */
 		emu_stack_destroy();
@@ -237,12 +238,6 @@ emu_core_modevent(module_t mod, int type, void *data)
 		mtx_destroy(&emu_instance_lock);
 
 		printf("emu_core: Emulation framework core unloaded\n");
-		error = 0;
-		break;
-
-	case MOD_STAT:
-		/* Return module statistics */
-		/* XXX: Implement module statistics if needed */
 		error = 0;
 		break;
 
