@@ -85,6 +85,7 @@ struct emu_instance {
 struct emu_user_limits {
 	uid_t			ul_uid;
 	int			ul_instance_count;
+	int			ul_total_vcpus;      /* Total vCPUs across all instances */
 	uint64_t		ul_total_memory;
 	TAILQ_ENTRY(emu_user_limits) ul_link;
 };
@@ -103,6 +104,12 @@ static int emu_max_instances = EMU_DEFAULT_MAX_INSTANCES;
 static int emu_max_instances_per_user = EMU_DEFAULT_MAX_INSTANCES_PER_USER;
 static uint64_t emu_max_memory_per_instance = EMU_DEFAULT_MAX_MEMORY_PER_INST;
 static uint64_t emu_max_cpu_time_per_instance = EMU_DEFAULT_MAX_CPU_TIME_PER_INST;
+
+/*
+ * SMP-aware limits (from emu_smp.c)
+ */
+extern int emu_max_vcpus_per_user;
+extern int emu_max_memory_per_vcpu;
 
 /*
  * Instance ID counter
@@ -150,7 +157,7 @@ emu_get_user_limits(uid_t uid)
  * Returns 0 on success, error code on failure
  */
 static int
-emu_check_user_limits(uid_t uid)
+emu_check_user_limits(uid_t uid, int num_vcpus, uint64_t memory)
 {
 	struct emu_user_limits *ul;
 	int error;
@@ -173,6 +180,22 @@ emu_check_user_limits(uid_t uid)
 		return (EMFILE);
 	}
 
+	/* Check per-user vCPU count (SMP-aware limit) */
+	if (ul->ul_total_vcpus + num_vcpus > emu_max_vcpus_per_user) {
+		printf("emu: user %d would exceed maximum vCPU count "
+		    "(%d + %d > %d)\n", uid, ul->ul_total_vcpus, num_vcpus,
+		    emu_max_vcpus_per_user);
+		return (EMFILE);
+	}
+
+	/* Check per-vCPU memory limit */
+	if (memory > (uint64_t)emu_max_memory_per_vcpu * 1024 * 1024) {
+		printf("emu: instance memory (%ju MB) exceeds max per vCPU "
+		    "(%d MB)\n", (uintmax_t)(memory / (1024 * 1024)),
+		    emu_max_memory_per_vcpu);
+		return (ENOMEM);
+	}
+
 	return (0);
 }
 
@@ -181,7 +204,7 @@ emu_check_user_limits(uid_t uid)
  * Must be called with emu_instance_lock held
  */
 static void
-emu_user_create_instance(uid_t uid, uint64_t memory)
+emu_user_create_instance(uid_t uid, int num_vcpus, uint64_t memory)
 {
 	struct emu_user_limits *ul;
 
@@ -189,6 +212,7 @@ emu_user_create_instance(uid_t uid, uint64_t memory)
 
 	ul = emu_get_user_limits(uid);
 	ul->ul_instance_count++;
+	ul->ul_total_vcpus += num_vcpus;
 	ul->ul_total_memory += memory;
 }
 
@@ -197,7 +221,7 @@ emu_user_create_instance(uid_t uid, uint64_t memory)
  * Must be called with emu_instance_lock held
  */
 static void
-emu_user_destroy_instance(uid_t uid, uint64_t memory)
+emu_user_destroy_instance(uid_t uid, int num_vcpus, uint64_t memory)
 {
 	struct emu_user_limits *ul;
 
@@ -206,6 +230,10 @@ emu_user_destroy_instance(uid_t uid, uint64_t memory)
 	ul = emu_find_user_limits(uid);
 	if (ul != NULL) {
 		ul->ul_instance_count--;
+		if (ul->ul_total_vcpus >= num_vcpus)
+			ul->ul_total_vcpus -= num_vcpus;
+		else
+			ul->ul_total_vcpus = 0;
 		if (ul->ul_total_memory >= memory)
 			ul->ul_total_memory -= memory;
 		else
@@ -306,8 +334,9 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		return (EEXIST);
 	}
 
-	/* Check user limits */
-	error = emu_check_user_limits(uid);
+	/* Check user limits (SMP-aware) */
+	error = emu_check_user_limits(uid, num_vcpus, memory_limit != 0 ?
+	    memory_limit : emu_max_memory_per_instance);
 	if (error != 0) {
 		mtx_unlock(&emu_instance_lock);
 		return (error);
@@ -365,8 +394,9 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		emu_vcpu_sysctl_create(inst->inst_id, inst->inst_name, &inst->inst_vcpus[i]);
 	}
 
-	/* Update user limits */
-	emu_user_create_instance(uid, inst->inst_memory_limit);
+	/* Update user limits (SMP-aware) */
+	emu_user_create_instance(uid, inst->inst_num_vcpus,
+	    inst->inst_memory_limit);
 
 	/* Add to instance list */
 	TAILQ_INSERT_TAIL(&emu_instances, inst, inst_link);
@@ -409,8 +439,9 @@ emu_instance_destroy(uint64_t inst_id)
 		return (EBUSY);
 	}
 
-	/* Update user limits */
-	emu_user_destroy_instance(inst->inst_uid, inst->inst_memory_limit);
+	/* Update user limits (SMP-aware) */
+	emu_user_destroy_instance(inst->inst_uid, inst->inst_num_vcpus,
+	    inst->inst_memory_limit);
 
 	/* Remove from instance list */
 	TAILQ_REMOVE(&emu_instances, inst, inst_link);
