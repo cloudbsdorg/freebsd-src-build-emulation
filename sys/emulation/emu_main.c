@@ -38,7 +38,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/lock.h>
 #include <sys/ucred.h>
+#include <sys/syslog.h>
 #include "emu.h"
+#include "emu_securelevel.h"
 
 MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
 
@@ -209,6 +211,13 @@ emu_core_modevent(module_t mod, int type, void *data)
 		break;
 
 	case MOD_UNLOAD:
+		/* Check securelevel restrictions (S9.2) */
+		error = emu_securelevel_restricted_op(curthread, "module_unload");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: module unload restricted by securelevel\n");
+			return (error);
+		}
+
 		/* Refuse unload if active instances */
 		mtx_lock(&emu_instance_lock);
 		if (emu_num_instances > 0) {

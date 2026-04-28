@@ -924,6 +924,15 @@ sysctl_emu_max_instances(SYSCTL_HANDLER_ARGS)
 	if (newval < 1 || newval > MAXEMUINSTANCES)
 		return (EINVAL);
 
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
+
 	emu_max_instances = newval;
 
 	return (0);
@@ -942,6 +951,15 @@ sysctl_emu_max_instances_per_user(SYSCTL_HANDLER_ARGS)
 
 	if (newval < 1 || newval > emu_max_instances)
 		return (EINVAL);
+
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
 
 	emu_max_instances_per_user = newval;
 
@@ -962,6 +980,15 @@ sysctl_emu_max_memory_per_instance(SYSCTL_HANDLER_ARGS)
 	if (newval < (128 * 1024 * 1024)) /* Minimum 128MB */
 		return (EINVAL);
 
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
+
 	emu_max_memory_per_instance = newval;
 
 	return (0);
@@ -980,6 +1007,15 @@ sysctl_emu_max_cpu_time_per_instance(SYSCTL_HANDLER_ARGS)
 
 	if (newval < 60) /* Minimum 60 seconds */
 		return (EINVAL);
+
+	/* Check securelevel restrictions (S9.2) */
+	if (req->newptr != NULL) {
+		error = emu_securelevel_restricted_op(curthread, "sysctl_write");
+		if (error != 0) {
+			log(LOG_WARNING, "emu: sysctl write restricted by securelevel\n");
+			return (error);
+		}
+	}
 
 	emu_max_cpu_time_per_instance = newval;
 
