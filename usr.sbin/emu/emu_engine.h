@@ -98,6 +98,24 @@ struct emu_guest_mem {
 int emu_disable_coredump(void);
 
 /*
+ * Ptrace prevention
+ *
+ * Disable ptrace attachment to emulator processes to prevent debugger
+ * attacks and guest memory inspection.
+ */
+
+/**
+ * emu_disable_ptrace() - Disable ptrace attachment to emulator process
+ *
+ * Prevents debuggers from attaching to the emulator process using
+ * procctl PROC_TRACE_CTL_DISABLE. This blocks ptrace(PTRACE_ATTACH)
+ * and prevents guest memory inspection via debugger.
+ *
+ * @return 0 on success, -1 on failure with errno set
+ */
+int emu_disable_ptrace(void);
+
+/*
  * Emulator execution state with security controls
  *
  * This structure tracks execution state for security features:

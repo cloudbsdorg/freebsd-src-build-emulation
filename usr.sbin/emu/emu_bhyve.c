@@ -493,6 +493,30 @@ emu_bhyve_disable_coredump(void)
 }
 
 /*
+ * Disable ptrace attachment for bhyve process
+ *
+ * Prevents debuggers from attaching to the bhyve process.
+ * Should be called during bhyve initialization.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_bhyve_disable_ptrace(void)
+{
+	int error;
+
+	/* Disable ptrace attachment to this process */
+	error = procctl(P_PID, getpid(), PROC_TRACE_CTL,
+	    (void *)(uintptr_t)PROC_TRACE_CTL_DISABLE);
+	if (error != 0) {
+		warn("procctl(PROC_TRACE_CTL) failed");
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
  * Enter Capsicum capability mode sandbox for bhyve process
  *
  * This function restricts the bhyve process to only access
