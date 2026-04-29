@@ -31,6 +31,8 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/procctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +78,34 @@
  * - Cannot execute new binaries or fork processes
  * - Cannot access /proc, /sys, or other sensitive paths
  */
+
+/*
+ * Core dump prevention - Disable core dumps to prevent guest secrets from leaking
+ */
+int
+emu_disable_coredump(void)
+{
+	struct rlimit rl;
+	int error;
+
+	/* Set core dump size limit to 0 */
+	rl.rlim_cur = 0;
+	rl.rlim_max = 0;
+	if (setrlimit(RLIMIT_CORE, &rl) != 0) {
+		warn("setrlimit(RLIMIT_CORE) failed");
+		return (-1);
+	}
+
+	/* Disable core dumps via procctl */
+	error = procctl(P_PID, getpid(), PROC_COREDUMP_CTL,
+	    (void *)(uintptr_t)PROC_COREDUMP_DISABLE);
+	if (error != 0) {
+		warn("procctl(PROC_COREDUMP_CTL) failed");
+		return (-1);
+	}
+
+	return (0);
+}
 
 /* Convert memory access result to string for debugging */
 const char *

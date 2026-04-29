@@ -125,6 +125,13 @@ bool emu_bhyve_is_available(void);
 int emu_bhyve_get_version(void);
 
 /*
+ * Core dump prevention for bhyve process
+ */
+
+/* Disable core dumps for bhyve process */
+int emu_bhyve_disable_coredump(void);
+
+/*
  * Capsicum sandboxing for bhyve process
  */
 

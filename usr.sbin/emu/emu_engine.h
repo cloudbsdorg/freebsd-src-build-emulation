@@ -81,6 +81,23 @@ struct emu_guest_mem {
 };
 
 /*
+ * Core dump prevention
+ *
+ * Disable core dumps for emulator processes to prevent guest secrets
+ * from leaking via core dump files.
+ */
+
+/**
+ * emu_disable_coredump() - Disable core dumps for emulator process
+ *
+ * Prevents guest memory contents from being written to core dump files
+ * by setting RLIMIT_CORE to 0 and using procctl to disable core dumps.
+ *
+ * @return 0 on success, -1 on failure with errno set
+ */
+int emu_disable_coredump(void);
+
+/*
  * Emulator execution state with security controls
  *
  * This structure tracks execution state for security features:
