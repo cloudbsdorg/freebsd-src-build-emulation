@@ -132,6 +132,13 @@ int emu_bhyve_get_version(void);
 int emu_bhyve_disable_coredump(void);
 
 /*
+ * Ptrace prevention for bhyve process
+ */
+
+/* Disable ptrace attachment for bhyve process */
+int emu_bhyve_disable_ptrace(void);
+
+/*
  * Capsicum sandboxing for bhyve process
  */
 

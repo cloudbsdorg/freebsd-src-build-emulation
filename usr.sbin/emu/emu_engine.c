@@ -107,6 +107,25 @@ emu_disable_coredump(void)
 	return (0);
 }
 
+/*
+ * Ptrace prevention - Disable ptrace attachment to prevent debugger attacks
+ */
+int
+emu_disable_ptrace(void)
+{
+	int error;
+
+	/* Disable ptrace attachment to this process */
+	error = procctl(P_PID, getpid(), PROC_TRACE_CTL,
+	    (void *)(uintptr_t)PROC_TRACE_CTL_DISABLE);
+	if (error != 0) {
+		warn("procctl(PROC_TRACE_CTL) failed");
+		return (-1);
+	}
+
+	return (0);
+}
+
 /* Convert memory access result to string for debugging */
 const char *
 emu_mem_access_str(enum emu_mem_access access)
