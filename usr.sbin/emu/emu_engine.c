@@ -51,6 +51,7 @@
 #include "emu.h"
 #include "emu_mem.h"
 #include "emu_memmgmt.h"
+#include "emu_oom.h"
 
 /*
  * Emulation Engine - Bounds-Checked Memory Access Implementation
@@ -308,31 +309,6 @@ emu_handle_signal(int sig)
  * - Allows graceful degradation under memory pressure
  */
 
-/*
- * Adjust OOM score for emulator process
- *
- * Makes the emulator process less likely to be killed by the OOM killer
- * by setting the OOM adjustment to the minimum value.
- *
- * Returns:
- *   0 on success
- *   -1 on failure with errno set
- */
-int
-emu_adjust_oom_score(void)
-{
-	int error;
-
-	/* Set OOM adjustment to minimum (least likely to be killed) */
-	error = procctl(P_PID, getpid(), PROC_OOMADJ_CTL,
-	    (void *)(uintptr_t)PROC_OOMADJ_MIN);
-	if (error != 0) {
-		warn("procctl(PROC_OOMADJ_CTL) failed");
-		return (-1);
-	}
-
-	return (0);
-}
 
 /* Convert memory access result to string for debugging */
 const char *
