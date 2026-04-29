@@ -28,6 +28,8 @@
 #include <sys/stat.h>
 #include <sys/capsicum.h>
 #include <sys/capability.h>
+#include <sys/resource.h>
+#include <sys/procctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -454,6 +456,39 @@ emu_bhyve_limit_vmm_ioctls(int vmm_fd)
 	 * For now, we don't limit ioctls as the specific numbers
 	 * are defined in machine/vmm.h and vary by architecture.
 	 */
+	return (0);
+}
+
+/*
+ * Disable core dumps for bhyve process
+ *
+ * Prevents guest memory contents from being written to core dump files.
+ * Should be called during bhyve initialization.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_bhyve_disable_coredump(void)
+{
+	struct rlimit rl;
+	int error;
+
+	/* Set core dump size limit to 0 */
+	rl.rlim_cur = 0;
+	rl.rlim_max = 0;
+	if (setrlimit(RLIMIT_CORE, &rl) != 0) {
+		warn("setrlimit(RLIMIT_CORE) failed");
+		return (-1);
+	}
+
+	/* Disable core dumps via procctl */
+	error = procctl(P_PID, getpid(), PROC_COREDUMP_CTL,
+	    (void *)(uintptr_t)PROC_COREDUMP_DISABLE);
+	if (error != 0) {
+		warn("procctl(PROC_COREDUMP_CTL) failed");
+		return (-1);
+	}
+
 	return (0);
 }
 
