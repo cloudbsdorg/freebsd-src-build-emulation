@@ -116,6 +116,42 @@ int emu_disable_coredump(void);
 int emu_disable_ptrace(void);
 
 /*
+ * Signal Handling Security - Safe Signal Handlers
+ *
+ * Flag-only signal handlers that cannot inject unexpected behavior.
+ * Signal handlers only set atomic flags, which are then checked in
+ * the main execution loop.
+ */
+
+/**
+ * emu_init_signal_handlers() - Initialize signal handlers for emulator process
+ *
+ * Sets up flag-only signal handlers for SIGSEGV, SIGPIPE, SIGTERM,
+ * SIGINT, SIGHUP, SIGUSR1, and SIGUSR2.
+ *
+ * @return 0 on success, -1 on failure
+ */
+int emu_init_signal_handlers(void);
+
+/**
+ * emu_check_signals() - Check and handle pending signals
+ *
+ * Should be called in the main execution loop to process any signals
+ * that have been received.
+ *
+ * @return 0 if no signals pending, signal number if signal needs handling
+ */
+int emu_check_signals(void);
+
+/**
+ * emu_handle_signal() - Handle a signal in the main loop context
+ *
+ * @param sig Signal number to handle
+ * @return 0 to continue execution, -1 to terminate
+ */
+int emu_handle_signal(int sig);
+
+/*
  * Emulator execution state with security controls
  *
  * This structure tracks execution state for security features:

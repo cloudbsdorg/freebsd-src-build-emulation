@@ -33,6 +33,7 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/procctl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +45,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #include "emu_engine.h"
 #include "emu.h"
@@ -124,6 +126,174 @@ emu_disable_ptrace(void)
 	}
 
 	return (0);
+}
+
+/*
+ * Signal Handling Security - Safe Signal Handlers
+ *
+ * This section implements flag-only signal handlers that cannot inject
+ * unexpected behavior. Signal handlers only set atomic flags, which are
+ * then checked in the main execution loop.
+ *
+ * Security benefits:
+ * - No non-reentrant function calls in signal handlers
+ * - Signals cannot corrupt emulator state
+ * - Graceful handling of SIGSEGV, SIGPIPE, SIGTERM, SIGINT, SIGHUP, SIGUSR1, SIGUSR2
+ */
+
+/* Atomic signal flags - one per signal type */
+static volatile sig_atomic_t g_sigsegv_flag = 0;
+static volatile sig_atomic_t g_sigpipe_flag = 0;
+static volatile sig_atomic_t g_sigterm_flag = 0;
+static volatile sig_atomic_t g_sigint_flag = 0;
+static volatile sig_atomic_t g_sighup_flag = 0;
+static volatile sig_atomic_t g_sigusr1_flag = 0;
+static volatile sig_atomic_t g_sigusr2_flag = 0;
+
+/* Signal handler - flag-only, no non-reentrant calls */
+static void
+emu_signal_handler(int sig)
+{
+	switch (sig) {
+	case SIGSEGV:
+		g_sigsegv_flag = 1;
+		break;
+	case SIGPIPE:
+		g_sigpipe_flag = 1;
+		break;
+	case SIGTERM:
+		g_sigterm_flag = 1;
+		break;
+	case SIGINT:
+		g_sigint_flag = 1;
+		break;
+	case SIGHUP:
+		g_sighup_flag = 1;
+		break;
+	case SIGUSR1:
+		g_sigusr1_flag = 1;
+		break;
+	case SIGUSR2:
+		g_sigusr2_flag = 1;
+		break;
+	}
+}
+
+/*
+ * Initialize signal handlers for emulator process
+ *
+ * Sets up flag-only signal handlers for all monitored signals.
+ * Returns 0 on success, -1 on failure.
+ */
+int
+emu_init_signal_handlers(void)
+{
+	struct sigaction sa;
+	int signals[] = {SIGSEGV, SIGPIPE, SIGTERM, SIGINT, SIGHUP, SIGUSR1, SIGUSR2};
+	size_t i;
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = emu_signal_handler;
+
+	for (i = 0; i < nitems(signals); i++) {
+		if (sigaction(signals[i], &sa, NULL) != 0) {
+			warn("sigaction for signal %d failed", signals[i]);
+			return (-1);
+		}
+	}
+
+	return (0);
+}
+
+/*
+ * Check and handle pending signals
+ *
+ * This should be called in the main execution loop to process
+ * any signals that have been received.
+ *
+ * Returns:
+ *   0 if no signals pending
+ *   Signal number if signal needs handling
+ */
+int
+emu_check_signals(void)
+{
+	if (g_sigsegv_flag) {
+		g_sigsegv_flag = 0;
+		return (SIGSEGV);
+	}
+	if (g_sigpipe_flag) {
+		g_sigpipe_flag = 0;
+		return (SIGPIPE);
+	}
+	if (g_sigterm_flag) {
+		g_sigterm_flag = 0;
+		return (SIGTERM);
+	}
+	if (g_sigint_flag) {
+		g_sigint_flag = 0;
+		return (SIGINT);
+	}
+	if (g_sighup_flag) {
+		g_sighup_flag = 0;
+		return (SIGHUP);
+	}
+	if (g_sigusr1_flag) {
+		g_sigusr1_flag = 0;
+		return (SIGUSR1);
+	}
+	if (g_sigusr2_flag) {
+		g_sigusr2_flag = 0;
+		return (SIGUSR2);
+	}
+
+	return (0);
+}
+
+/*
+ * Handle a signal in the main loop context
+ *
+ * Parameters:
+ *   sig - Signal number to handle
+ *
+ * Returns:
+ *   0 to continue execution
+ *   -1 to terminate
+ */
+int
+emu_handle_signal(int sig)
+{
+	switch (sig) {
+	case SIGSEGV:
+		warnx("SIGSEGV received - segmentation violation in emulator");
+		return (-1);
+	case SIGPIPE:
+		warnx("SIGPIPE received - broken pipe in console/network");
+		/* Continue execution, pipe may be reconnected */
+		return (0);
+	case SIGTERM:
+		warnx("SIGTERM received - terminating gracefully");
+		return (-1);
+	case SIGINT:
+		warnx("SIGINT received - interrupting execution");
+		return (-1);
+	case SIGHUP:
+		warnx("SIGHUP received - hanging up");
+		return (-1);
+	case SIGUSR1:
+		warnx("SIGUSR1 received - user-defined signal 1");
+		/* Could be used for custom actions */
+		return (0);
+	case SIGUSR2:
+		warnx("SIGUSR2 received - user-defined signal 2");
+		/* Could be used for custom actions */
+		return (0);
+	default:
+		warnx("Unknown signal %d received", sig);
+		return (0);
+	}
 }
 
 /* Convert memory access result to string for debugging */
