@@ -31,7 +31,7 @@ TESTSDIR=	${TESTSBASE}/usr.sbin/emu
 
 BINDIR=		${TESTSDIR}
 
-ATF_TESTS_SH+=	device_security_test capsicum_integration_test endian_test filesystem_security_test
+ATF_TESTS_SH+=	device_security_test capsicum_integration_test endian_test filesystem_security_test signal_test
 
 ${PACKAGE}FILES+=	utils.subr
 
