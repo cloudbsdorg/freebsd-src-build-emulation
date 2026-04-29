@@ -152,6 +152,23 @@ int emu_check_signals(void);
 int emu_handle_signal(int sig);
 
 /*
+ * OOM Killer Protection - Adjust OOM Score
+ *
+ * Makes the emulator process less likely to be killed by the OOM killer.
+ */
+
+/**
+ * emu_adjust_oom_score() - Adjust OOM score for emulator process
+ *
+ * Makes the emulator process less likely to be killed by the OOM killer
+ * by setting the OOM adjustment to the minimum value using
+ * procctl(PROC_OOMADJ_CTL, PROC_OOMADJ_MIN).
+ *
+ * @return 0 on success, -1 on failure with errno set
+ */
+int emu_adjust_oom_score(void);
+
+/*
  * Emulator execution state with security controls
  *
  * This structure tracks execution state for security features:
