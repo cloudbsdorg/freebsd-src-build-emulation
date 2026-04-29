@@ -296,6 +296,44 @@ emu_handle_signal(int sig)
 	}
 }
 
+/*
+ * OOM Killer Protection - Adjust OOM Score
+ *
+ * This section implements OOM killer protection for emulator processes
+ * to prevent them from being prematurely killed under memory pressure.
+ *
+ * Security benefits:
+ * - Emulator processes are less likely to be killed than other processes
+ * - Protects guest state from corruption due to sudden termination
+ * - Allows graceful degradation under memory pressure
+ */
+
+/*
+ * Adjust OOM score for emulator process
+ *
+ * Makes the emulator process less likely to be killed by the OOM killer
+ * by setting the OOM adjustment to the minimum value.
+ *
+ * Returns:
+ *   0 on success
+ *   -1 on failure with errno set
+ */
+int
+emu_adjust_oom_score(void)
+{
+	int error;
+
+	/* Set OOM adjustment to minimum (least likely to be killed) */
+	error = procctl(P_PID, getpid(), PROC_OOMADJ_CTL,
+	    (void *)(uintptr_t)PROC_OOMADJ_MIN);
+	if (error != 0) {
+		warn("procctl(PROC_OOMADJ_CTL) failed");
+		return (-1);
+	}
+
+	return (0);
+}
+
 /* Convert memory access result to string for debugging */
 const char *
 emu_mem_access_str(enum emu_mem_access access)
