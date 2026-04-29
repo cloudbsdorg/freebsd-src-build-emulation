@@ -53,6 +53,9 @@ void emu_stack_init(void);
 void emu_stack_destroy(void);
 int emu_audit_init(void);
 void emu_audit_destroy(void);
+void emu_memmgmt_init(void);
+void emu_scrub_init(void);
+void emu_scrub_destroy(void);
 
 /*
  * Emulation Framework Core Module (emu_core.ko)
@@ -197,6 +200,12 @@ emu_core_modevent(module_t mod, int type, void *data)
 			/* Continue anyway - audit is optional */
 		}
 
+		/* Initialize memory management subsystem */
+		emu_memmgmt_init();
+
+		/* Initialize memory scrubbing subsystem */
+		emu_scrub_init();
+
 		/* Validate no conflicts */
 		/* XXX: Check for conflicting emulation frameworks */
 
@@ -237,6 +246,9 @@ emu_core_modevent(module_t mod, int type, void *data)
 
 		/* Clean up audit logging subsystem */
 		emu_audit_destroy();
+
+		/* Clean up memory scrubbing subsystem */
+		emu_scrub_destroy();
 
 		/* Clean up sysctl infrastructure */
 		emu_sysctl_destroy();
