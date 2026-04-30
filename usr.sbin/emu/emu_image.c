@@ -26,11 +26,14 @@
  */
 
 #include <sys/param.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "emu.h"
@@ -192,4 +195,144 @@ emu_cmd_image(int argc, char *argv[])
 	warnx("Unknown image command: %s", command);
 	image_usage();
 	return (EX_USAGE);
+}
+
+/*
+ * Image cache directory
+ */
+static const char *image_cache_dir = "/var/tmp/emu/images";
+
+/*
+ * List cached images
+ *
+ * Returns 0 on success, error code on failure
+ */
+int
+emu_image_list(void)
+{
+	DIR *dir;
+	struct dirent *entry;
+
+	if (!g_quiet)
+		printf("Cached images in %s:\n", image_cache_dir);
+
+	dir = opendir(image_cache_dir);
+	if (dir == NULL) {
+		if (errno == ENOENT) {
+			printf("  (no images cached)\n");
+			return (0);
+		}
+		return (errno);
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.')
+			continue;
+		printf("  %s\n", entry->d_name);
+	}
+
+	closedir(dir);
+	return (0);
+}
+
+/*
+ * Check if an image is cached
+ *
+ * Parameters:
+ *   arch - Architecture
+ *   name - Image name
+ *
+ * Returns 0 if cached, error code if not cached or error
+ */
+int
+emu_image_cached(const char *arch, const char *name)
+{
+	char path[PATH_MAX];
+	struct stat sb;
+
+	snprintf(path, sizeof(path), "%s/%s-%s.img", image_cache_dir, arch, name);
+
+	if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode))
+		return (0);
+
+	return (ENOENT);
+}
+
+/*
+ * Remove a cached image
+ *
+ * Parameters:
+ *   arch - Architecture
+ *   name - Image name
+ *
+ * Returns 0 on success, error code on failure
+ */
+int
+emu_image_remove(const char *arch, const char *name)
+{
+	char path[PATH_MAX];
+	int ret;
+
+	snprintf(path, sizeof(path), "%s/%s-%s.img", image_cache_dir, arch, name);
+
+	ret = unlink(path);
+	if (ret != 0)
+		return (errno);
+
+	return (0);
+}
+
+/*
+ * Cleanup old cached images
+ *
+ * Parameters:
+ *   max_age_days - Maximum age in days
+ *
+ * Returns number of images removed, or -1 on error
+ */
+int
+emu_image_cleanup(int max_age_days)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char path[PATH_MAX];
+	struct stat sb;
+	time_t max_age;
+	int removed = 0;
+	int ret;
+
+	max_age = time(NULL) - (max_age_days * 24 * 60 * 60);
+
+	dir = opendir(image_cache_dir);
+	if (dir == NULL) {
+		if (errno == ENOENT)
+			return (0);
+		return (-1);
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.')
+			continue;
+
+		snprintf(path, sizeof(path), "%s/%s", image_cache_dir, entry->d_name);
+
+		if (stat(path, &sb) != 0)
+			continue;
+
+		if (!S_ISREG(sb.st_mode))
+			continue;
+
+		if (sb.st_mtime > max_age)
+			continue;
+
+		ret = unlink(path);
+		if (ret == 0) {
+			if (g_verbose)
+				printf("Removed: %s\n", entry->d_name);
+			removed++;
+		}
+	}
+
+	closedir(dir);
+	return (removed);
 }

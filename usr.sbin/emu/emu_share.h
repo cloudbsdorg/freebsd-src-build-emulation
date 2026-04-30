@@ -28,6 +28,7 @@
 #define	_EMU_SHARE_H_
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <stdint.h>
 #include <stdbool.h>
 

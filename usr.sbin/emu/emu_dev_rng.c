@@ -26,11 +26,14 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/random.h>
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+/* arc4random_buf is declared in stdlib.h on this system */
 
 #include "emu_dev_rng.h"
 #include "emu_virtqueue.h"
@@ -149,7 +152,7 @@ emu_rng_handle_request(struct emu_rng *rng, void *vq)
 	int is_write;
 	size_t buflen;
 	uint8_t *buf;
-	int error, count;
+ int error;
 
 	if (rng == NULL || vq == NULL)
 		return (EINVAL);

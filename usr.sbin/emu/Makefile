@@ -36,6 +36,7 @@ CFLAGS+= -I${SRCTOP}/lib/libsecureboot/openpgp
 CFLAGS+= -I${SRCTOP}/contrib/bearssl/inc
 CFLAGS+= -DUSE_BEARSSL
 CFLAGS+= -DCROSS_COMPILING
+LIBADD+= md
 # LDADD+=	-lveriexec  # libveriexec not available in build environment
 
 .include <bsd.prog.mk>

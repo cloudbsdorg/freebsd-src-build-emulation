@@ -44,6 +44,14 @@
 /* procctl() commands */
 #ifndef PROC_PROCCTL_MDVALIDATE
 #define PROC_PROCCTL_MDVALIDATE		0x10000000
+#define PROC_TRACE_CTL		0x01
+#define PROC_COREDUMP_CTL	0x02
+#define PROC_REAP		0x03
+#endif
+
+/* Process ID type for procctl */
+#ifndef P_PID
+#define P_PID	1
 #endif
 
 /* procctl() subcommands */
@@ -61,6 +69,8 @@
 #define PROC_SCE_ENVC		10
 #define PROC_SCE_ENVP		11
 #define PROC_SCE_STATUS		12
+#define PROC_COREDUMP_DISABLE	0
+#define PROC_COREDUMP_ENABLE	1
 #endif
 
 /* Signal numbers for sandboxing */

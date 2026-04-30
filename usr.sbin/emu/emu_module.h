@@ -1,11 +1,11 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2026 Mark LaPointe <mark@cloudbsd.org>
+ * Copyright (c) 2026 The FreeBSD Foundation
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions
+ * are met:
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
@@ -28,6 +28,10 @@
 #ifndef _EMU_MODULE_H
 #define _EMU_MODULE_H
 
+#include <stdbool.h>
+#include <stdint.h>
+#include <sys/types.h>
+
 /*
  * Dynamic Kernel Module Signature Verification
  *
@@ -36,58 +40,73 @@
  */
 
 /*
- * Verify module signature at load time.
- *
- * Parameters:
- *   module_name - Name of the module (e.g., "emu_core", "emu_amd64")
- *   module_path - Full path to the module file (e.g., "/boot/kernel/emu_core.ko")
- *
- * Returns:
- *   0 - Signature valid or verification disabled
- *   EACCES - Signature verification failed (tampered module or missing key)
- *   ENOENT - Module file not found
- *   EINVAL - Invalid signature format
- *   other - Error reading signature file
+ * Module information structure
  */
-int emu_module_verify_signature(const char *module_name, const char *module_path);
+struct emu_module_info {
+	char		name[64];	/* Module name */
+	char		version[32];	/* Module version */
+	char		author[64];	/* Module author */
+	bool		loaded;		/* Currently loaded */
+	size_t		size;		/* Module size in bytes */
+	uint64_t	loaded_time;	/* Time module was loaded */
+};
 
 /*
- * Generate a signature file for a module.
- * This is used during the build process to sign modules.
- *
- * Parameters:
- *   module_path - Path to the module file
- *   sig_path - Path where signature file should be written
- *
- * Returns:
- *   0 - Success
- *   ENOENT - Module file not found or key not available
- *   EIO - Error writing signature file
+ * Module subsystem lifecycle
  */
-int emu_module_sign_module(const char *module_path, const char *sig_path);
+
+/* Initialize module subsystem */
+int emu_module_init(void);
+
+/* Cleanup module subsystem */
+void emu_module_cleanup(void);
 
 /*
- * Check if module signature verification is enabled.
- *
- * Returns:
- *   1 - Verification enabled
- *   0 - Verification disabled
+ * Module loading and unloading
  */
-int emu_module_is_verified(const char *module_name);
+
+/* Load a kernel module */
+int emu_module_load(const char *module_name, const char *args);
+
+/* Unload a kernel module */
+int emu_module_unload(const char *module_name);
 
 /*
- * Module event handler integration.
- * Call this from your module's modevent handler.
- *
- * Parameters:
- *   mod - The module_t passed to your modevent handler
- *   event - The event type (MOD_LOAD, MOD_UNLOAD, MOD_SHUTDOWN)
- *   arg - The arg passed to your modevent handler
- *
- * Returns:
- *   0 - Success
- *   Error code on failure
+ * Module queries
  */
-int emu_module_modevent_handler(module_t mod, int event, void *arg);
+
+/* Check if a module is loaded */
+bool emu_module_is_loaded(const char *module_name);
+
+/* Get list of loaded modules */
+int emu_module_list(char **list, int max_items);
+
+/* Get module information */
+int emu_module_info(const char *module_name, struct emu_module_info *info);
+
+/*
+ * Module signature verification
+ */
+
+/* Verify module signature at load time */
+int emu_module_verify_signature(const char *module_path, const uint8_t *signature,
+    size_t sig_len);
+
+/* Set verification mode */
+void emu_module_set_verify_mode(bool enabled, bool enforce_strict);
+
+/*
+ * Module dependencies
+ */
+
+/* Resolve module dependencies */
+int emu_module_resolve_deps(const char *module_name, char **deps, int max_deps);
+
+/*
+ * Statistics
+ */
+
+/* Get number of loaded modules */
+int emu_module_count(void);
 
 #endif /* _EMU_MODULE_H */

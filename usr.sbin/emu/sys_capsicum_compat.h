@@ -43,6 +43,10 @@
  * we use the native definitions. Otherwise, we provide stubs.
  */
 
+#include <sys/types.h>
+#include <stdbool.h>
+#include <stddef.h>
+
 /* Capsicum capability rights - provide definitions if not already defined */
 #ifndef CAP_READ
 #define CAP_READ            0x00000001
@@ -70,7 +74,8 @@
 #define CAP_RECEIVE         0x00400000
 #define CAP_MAC_LABEL       0x00800000
 #define CAP_MAP_ANON        0x01000000
-#define CAP_MPROTECT       0x02000000
+#define CAP_MMAP           0x02000000
+#define CAP_MPROTECT       0x04000000
 #define CAP_MUNMAP         0x04000000
 #define CAP_CREATE          0x08000000
 #define CAP_DESTROY         0x10000000

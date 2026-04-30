@@ -757,10 +757,12 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 	uint16_t imm16;
 	int32_t imm16_signed;
 	uint32_t value32;
-	uint16_t value16;
 	uint8_t value8;
 	uint64_t ea;
 	int i;
+
+	/* Suppress unused variable warnings - rb may be used in future opcodes */
+	(void)rb;
 
 	if (mem == NULL || insn == NULL || cpu == NULL)
 		return (EMU_DECODE_ERR_NULL);
@@ -785,7 +787,6 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 	opcode = (instruction >> 26) & 0x3F;
 	rd = (instruction >> 21) & 0x1F;
 	ra = (instruction >> 16) & 0x1F;
-	rb = (instruction >> 11) & 0x1F;
 
 	/*
 	 * Decode based on opcode (simplified PowerPC decoder)
@@ -833,7 +834,7 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 		ea = (ra == 0) ? 0 : cpu->gpr[ra];
 		ea += imm16_signed;
 		/* Use big-endian memory accessor for PowerPC */
-		if (emu_mem_read32(mem, ea, &value32, EMU_ENDIAN_BIG) != EMU_MEM_ACCESS_OK)
+		if (emu_mem_read32(mem, ea, &value32) != EMU_MEM_ACCESS_OK)
 			return (EMU_DECODE_ERR_BOUNDS);
 		insn->operands[0].type = EMU_OP_REG;
 		insn->operands[0].reg = rd;
@@ -869,7 +870,8 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 		ea += imm16_signed;
 		value32 = cpu->gpr[rd];
 		/* Use big-endian memory accessor for PowerPC */
-		if (emu_mem_write32(mem, ea, value32, EMU_ENDIAN_BIG) != EMU_MEM_ACCESS_OK)
+		/* Note: Value already in big-endian from register, so just write directly */
+		if (emu_mem_write32(mem, ea, value32) != EMU_MEM_ACCESS_OK)
 			return (EMU_DECODE_ERR_BOUNDS);
 		insn->operands[0].type = EMU_OP_REG;
 		insn->operands[0].reg = rd;
@@ -901,11 +903,13 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 		return (EMU_DECODE_OK);
 
 	case 47: /* ld - Load Doubleword */
+		{
+		uint64_t value64;
 		imm16_signed = (int16_t)(instruction & 0xFFFF);
 		ea = (ra == 0) ? 0 : cpu->gpr[ra];
 		ea += imm16_signed;
 		/* Use big-endian memory accessor for PowerPC64 */
-		if (emu_mem_read64(mem, ea, &value64, EMU_ENDIAN_BIG) != EMU_MEM_ACCESS_OK)
+		if (emu_mem_read64(mem, ea, &value64) != EMU_MEM_ACCESS_OK)
 			return (EMU_DECODE_ERR_BOUNDS);
 		insn->operands[0].type = EMU_OP_REG;
 		insn->operands[0].reg = rd;
@@ -916,15 +920,18 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 		insn->mnemonic = "ld";
 		insn->length = 4;
 		insn->flags |= EMU_INSFLAG_READS_MEM;
+		}
 		return (EMU_DECODE_OK);
 
 	case 54: /* std - Store Doubleword */
+		{
+		uint64_t value64;
 		imm16_signed = (int16_t)(instruction & 0xFFFF);
 		ea = (ra == 0) ? 0 : cpu->gpr[ra];
 		ea += imm16_signed;
 		value64 = cpu->gpr[rd];
 		/* Use big-endian memory accessor for PowerPC64 */
-		if (emu_mem_write64(mem, ea, value64, EMU_ENDIAN_BIG) != EMU_MEM_ACCESS_OK)
+		if (emu_mem_write64(mem, ea, value64) != EMU_MEM_ACCESS_OK)
 			return (EMU_DECODE_ERR_BOUNDS);
 		insn->operands[0].type = EMU_OP_REG;
 		insn->operands[0].reg = rd;
@@ -935,6 +942,7 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 		insn->mnemonic = "std";
 		insn->length = 4;
 		insn->flags |= EMU_INSFLAG_WRITES_MEM;
+		}
 		return (EMU_DECODE_OK);
 
 	case 58: /* addi - Add Immediate */

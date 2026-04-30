@@ -32,7 +32,7 @@
  * This module provides kernel symbol resolution using ELF parsing.
  * It supports resolving addresses from:
  * - Running kernel (/boot/kernel/kernel)
- * - Kernel modules (/boot/kernel/*.ko)
+ * - Kernel modules (/boot/kernel)
  * - Custom kernel files specified by the user
  */
 
@@ -114,6 +114,9 @@ static struct sym_table *emu_sym_load_table(const char *path);
 static void emu_sym_parse_table(struct sym_table *st);
 static void emu_sym_free_table(struct sym_table *st);
 static struct sym_entry *sym_find(struct sym_table *st, uint64_t addr);
+
+/* Public function for loading a module's symbols */
+struct sym_table *emu_sym_load_module(const char *module_name);
 
 /*
  * Default kernel path

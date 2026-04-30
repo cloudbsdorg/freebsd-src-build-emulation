@@ -470,3 +470,25 @@ emu_cmd_blob(int argc, char *argv[])
 
 	return (0);
 }
+
+/*
+ * Stub implementation for openpgp_verify from libsecureboot
+ * This is needed for cross-compilation as libsecureboot is not available
+ */
+int
+openpgp_verify(const char *filename, unsigned char *fdata, size_t fbytes,
+    unsigned char *sdata, size_t sbytes, int flags)
+{
+	(void)filename;
+	(void)fdata;
+	(void)fbytes;
+	(void)sdata;
+	(void)sbytes;
+	(void)flags;
+
+	/* Stub: GPG verification not available in cross-compilation */
+	if (g_verbose)
+		fprintf(stderr, "GPG signature verification is a stub in cross-compilation mode\n");
+
+	return (-1); /* Return error as verification is not available */
+}
