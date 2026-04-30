@@ -343,6 +343,77 @@ emu_cmd_blob(int argc, char *argv[])
 
 		return (0);
 
+	} else if (strcmp(command, "check-version") == 0) {
+		if (g_verbose)
+			printf("Checking firmware version for blob '%s'\n", blob_name);
+
+		/* S19.3: Implement firmware version checking */
+		char blob_version[64];
+		char vulnerable_versions[256];
+		int is_vulnerable = 0;
+
+		/* Get blob version from sysctl */
+		snprintf(sysctl_name, sizeof(sysctl_name),
+		    "kern.emulation.blob.%s.version", blob_name);
+		len = sizeof(blob_version);
+		error = sysctlbyname(sysctl_name, blob_version, &len, NULL, 0);
+		if (error != 0) {
+			if (errno == ENOENT) {
+				fprintf(stderr, "Blob '%s' not found\n", blob_name);
+			} else {
+				fprintf(stderr, "Failed to get blob version: %s\n", strerror(errno));
+			}
+			return (errno);
+		}
+
+		/* Get list of vulnerable versions from sysctl */
+		snprintf(sysctl_name, sizeof(sysctl_name),
+		    "kern.emulation.blob.%s.vulnerable_versions", blob_name);
+		len = sizeof(vulnerable_versions);
+		error = sysctlbyname(sysctl_name, vulnerable_versions, &len, NULL, 0);
+		if (error != 0) {
+			if (errno == ENOENT) {
+				/* No vulnerable versions list available */
+				if (!g_quiet)
+					printf("Firmware blob '%s' version %s: no vulnerability data available\n", 
+					    blob_name, blob_version);
+				return (0);
+			} else {
+				fprintf(stderr, "Failed to get vulnerable versions list: %s\n", strerror(errno));
+				return (errno);
+			}
+		}
+
+		/* Check if current version matches any vulnerable version */
+		/* vulnerable_versions is comma-separated list */
+		char *saveptr;
+		char *vuln_ver = strtok_r(vulnerable_versions, ",", &saveptr);
+		while (vuln_ver != NULL) {
+			/* Trim leading/trailing whitespace */
+			while (*vuln_ver == ' ') vuln_ver++;
+			char *end = vuln_ver + strlen(vuln_ver) - 1;
+			while (end > vuln_ver && *end == ' ') *end-- = '\0';
+
+			if (strcmp(blob_version, vuln_ver) == 0) {
+				is_vulnerable = 1;
+				break;
+			}
+			vuln_ver = strtok_r(NULL, ",", &saveptr);
+		}
+
+		if (is_vulnerable) {
+			fprintf(stderr, "WARNING: Firmware blob '%s' version %s is vulnerable!\n", 
+			    blob_name, blob_version);
+			fprintf(stderr, "Please update to a newer version.\n");
+			return (EVETOKENEXP); /* Using EVETOKENEXP as "version expired/vulnerable" */
+		}
+
+		if (!g_quiet)
+			printf("Firmware blob '%s' version %s: OK (not in vulnerable versions list)\n", 
+			    blob_name, blob_version);
+
+		return (0);
+
 	} else if (strcmp(command, "delete") == 0) {
 		if (g_verbose)
 			printf("Deleting firmware blob '%s'\n", blob_name);
