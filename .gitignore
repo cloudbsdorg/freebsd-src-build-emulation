@@ -40,3 +40,25 @@ tags
 .ccls-cache
 sys/*/compile
 /src.conf
+# ATF test binaries (compiled shell scripts)
+tests/**/acl_test
+tests/**/audit_test
+tests/**/caps_test
+tests/**/coredump_test
+tests/**/dtrace_test
+tests/**/fuzz_decoder
+tests/**/instance_test
+tests/**/kaslr_test
+tests/**/module_test
+tests/**/oom_test
+tests/**/option_test
+tests/**/ptrace_test
+tests/**/rctl_test
+tests/**/rng_test
+tests/**/scrub_test
+tests/**/securelevel_test
+tests/**/security_test
+tests/**/signal_test
+tests/**/smp_test
+tests/**/stack_test
+tests/**/toctou_test
