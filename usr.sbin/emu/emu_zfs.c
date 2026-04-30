@@ -62,12 +62,12 @@
 #define	EMU_ZFS_PATH_MAX		PATH_MAX
 
 /*
- * Check if ZFS is available on the system
+ * Internal: Check if ZFS is available on the system
  *
  * Returns true if ZFS is available, false otherwise
  */
 static bool
-emu_zfs_is_available(void)
+zfs_is_available(void)
 {
 	struct stat sb;
 
@@ -95,13 +95,13 @@ emu_zfs_is_available(void)
  * Returns 0 on success, -1 on failure
  */
 static int
-emu_zfs_get_dataset(const char *path, char *dataset, size_t dataset_len)
+zfs_get_dataset(const char *path, char *dataset, size_t dataset_len)
 {
 	char cmd[PATH_MAX + 64];
 	FILE *fp;
 	char *newline;
 
-	if (!emu_zfs_is_available()) {
+	if (!zfs_is_available()) {
 		warnx("ZFS is not available on this system");
 		return (-1);
 	}
@@ -170,7 +170,7 @@ emu_zfs_snapshot_create(const char *dataset, const char *snap_name, bool recursi
 		return (-1);
 	}
 
-	if (verbose)
+	if (g_verbose)
 		printf("Created ZFS snapshot: %s\n", full_snap_name);
 
 	return (0);
@@ -204,7 +204,7 @@ emu_zfs_snapshot_destroy(const char *dataset, const char *snap_name)
 		return (-1);
 	}
 
-	if (verbose)
+	if (g_verbose)
 		printf("Destroyed ZFS snapshot: %s\n", full_snap_name);
 
 	return (0);
@@ -243,14 +243,14 @@ emu_zfs_rollback(const char *dataset, const char *snap_name, bool recursive)
 		return (-1);
 	}
 
-	if (verbose)
+	if (g_verbose)
 		printf("Rolled back to ZFS snapshot: %s\n", full_snap_name);
 
 	return (0);
 }
 
 /*
- * List ZFS snapshots for a dataset
+ * Internal: List ZFS snapshots for a dataset
  *
  * Parameters:
  *   dataset    - ZFS dataset name
@@ -260,16 +260,15 @@ emu_zfs_rollback(const char *dataset, const char *snap_name, bool recursive)
  * Returns number of snapshots found, or -1 on failure
  */
 static int
-emu_zfs_list_snapshots(const char *dataset, char ***snapshots, int max_snaps)
+zfs_list_snapshots_internal(const char *dataset, char ***snapshots, int max_snaps)
 {
 	char cmd[EMU_ZFS_DATASET_NAME_MAX + 64];
 	FILE *fp;
 	char line[EMU_ZFS_SNAP_NAME_MAX];
 	char *snap_name;
 	int count = 0;
-	int i;
 
-	if (!emu_zfs_is_available()) {
+	if (!zfs_is_available()) {
 		warnx("ZFS is not available on this system");
 		return (-1);
 	}
@@ -384,14 +383,14 @@ emu_zfs_init(struct emu_zfs_ctx *ctx, const char *instance_dir)
 	memset(ctx, 0, sizeof(struct emu_zfs_ctx));
 
 	/* Check if ZFS is available */
-	if (!emu_zfs_is_available()) {
+	if (!zfs_is_available()) {
 		warnx("ZFS is not available - snapshots will not be supported");
 		ctx->available = false;
 		return (0); /* Not a fatal error */
 	}
 
 	/* Get the dataset for the instance directory */
-	if (emu_zfs_get_dataset(instance_dir, ctx->dataset, sizeof(ctx->dataset)) != 0) {
+	if (zfs_get_dataset(instance_dir, ctx->dataset, sizeof(ctx->dataset)) != 0) {
 		warnx("Instance directory %s is not on a ZFS filesystem", instance_dir);
 		ctx->available = false;
 		return (0); /* Not a fatal error */
@@ -400,7 +399,7 @@ emu_zfs_init(struct emu_zfs_ctx *ctx, const char *instance_dir)
 	ctx->available = true;
 	strlcpy(ctx->instance_dir, instance_dir, sizeof(ctx->instance_dir));
 
-	if (verbose)
+	if (g_verbose)
 		printf("ZFS initialized for instance: dataset=%s\n", ctx->dataset);
 
 	return (0);
@@ -510,7 +509,7 @@ emu_zfs_list_snapshots(struct emu_zfs_ctx *ctx, char ***snapshots, int max_snaps
 		return (-1);
 	}
 
-	return (emu_zfs_list_snapshots(ctx->dataset, snapshots, max_snaps));
+	return (zfs_list_snapshots_internal(ctx->dataset, snapshots, max_snaps));
 }
 
 /*

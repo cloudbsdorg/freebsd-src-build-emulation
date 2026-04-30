@@ -29,11 +29,13 @@
 
 #include <sys/types.h>
 #include <sys/capsicum.h>
-#include <sys/capability.h>
+#include <sys/caprights.h>
 #include <sys/time.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+
+#include "emu_mem.h"
 
 /*
  * Emulation Engine - Bounds-Checked Memory Access
@@ -77,7 +79,7 @@ struct emu_guest_mem {
 	int		num_regions;	/* Number of regions */
 	bool		strict_align;	/* Enforce strict alignment */
 	bool		initialized;	/* Memory subsystem initialized */
-	enum emu_endian	guest_endian;	/* Guest endianness (EMU_ENDIAN_LITTLE/EMU_ENDIAN_BIG) */
+	enum emu_endian	guest_endian;	/* Guest endianness - defined in emu_mem.h */
 };
 
 /*
@@ -172,30 +174,25 @@ struct emu_exec_state {
 };
 
 /*
- * Memory access primitives - All accesses are bounds-checked
- *
- * These functions provide safe access to guest memory. Each function
- * validates the access against the guest memory descriptor before
- * performing the operation.
+ * Memory access primitives - see emu_mem.h for full declarations
+ * All accesses are bounds-checked
  */
 
-/* Read operations - return EMU_MEM_ACCESS_OK on success, error code on failure */
+/* Bounds-checked read operations */
 enum emu_mem_access emu_mem_read8(struct emu_guest_mem *mem, uint64_t guest_addr, uint8_t *value);
 enum emu_mem_access emu_mem_read16(struct emu_guest_mem *mem, uint64_t guest_addr, uint16_t *value);
 enum emu_mem_access emu_mem_read32(struct emu_guest_mem *mem, uint64_t guest_addr, uint32_t *value);
 enum emu_mem_access emu_mem_read64(struct emu_guest_mem *mem, uint64_t guest_addr, uint64_t *value);
 
-/* Bulk read operation */
-enum emu_mem_access emu_mem_read_bytes(struct emu_guest_mem *mem, uint64_t guest_addr,
-    void *buffer, size_t len);
-
-/* Write operations */
+/* Bounds-checked write operations */
 enum emu_mem_access emu_mem_write8(struct emu_guest_mem *mem, uint64_t guest_addr, uint8_t value);
 enum emu_mem_access emu_mem_write16(struct emu_guest_mem *mem, uint64_t guest_addr, uint16_t value);
 enum emu_mem_access emu_mem_write32(struct emu_guest_mem *mem, uint64_t guest_addr, uint32_t value);
 enum emu_mem_access emu_mem_write64(struct emu_guest_mem *mem, uint64_t guest_addr, uint64_t value);
 
-/* Bulk write operation */
+/* Bulk read/write operations */
+enum emu_mem_access emu_mem_read_bytes(struct emu_guest_mem *mem, uint64_t guest_addr,
+    void *buffer, size_t len);
 enum emu_mem_access emu_mem_write_bytes(struct emu_guest_mem *mem, uint64_t guest_addr,
     const void *buffer, size_t len);
 
@@ -275,125 +272,7 @@ void emu_exec_get_stats(struct emu_exec_state *state, uint64_t *total_insns,
 void emu_exec_state_destroy(struct emu_exec_state *state);
 
 /*
- * Inline helpers for performance-critical paths
- * These assume bounds checking has already been performed
+ * Inline helpers are defined in emu_mem.h
  */
-static inline uint8_t
-emu_mem_raw_read8(void *base, uint64_t offset)
-{
-	return (*(uint8_t *)((uint8_t *)base + offset));
-}
-
-static inline uint16_t
-emu_mem_raw_read16(void *base, uint64_t offset)
-{
-	uint16_t val;
-	memcpy(&val, (uint8_t *)base + offset, sizeof(val));
-	return (val);
-}
-
-static inline uint32_t
-emu_mem_raw_read32(void *base, uint64_t offset)
-{
-	uint32_t val;
-	memcpy(&val, (uint8_t *)base + offset, sizeof(val));
-	return (val);
-}
-
-static inline uint64_t
-emu_mem_raw_read64(void *base, uint64_t offset)
-{
-	uint64_t val;
-	memcpy(&val, (uint8_t *)base + offset, sizeof(val));
-	return (val);
-}
-
-static inline void
-emu_mem_raw_write8(void *base, uint64_t offset, uint8_t value)
-{
-	(*(uint8_t *)((uint8_t *)base + offset)) = value;
-}
-
-static inline void
-emu_mem_raw_write16(void *base, uint64_t offset, uint16_t value)
-{
-	memcpy((uint8_t *)base + offset, &value, sizeof(value));
-}
-
-static inline void
-emu_mem_raw_write32(void *base, uint64_t offset, uint32_t value)
-{
-	memcpy((uint8_t *)base + offset, &value, sizeof(value));
-}
-
-static inline void
-emu_mem_raw_write64(void *base, uint64_t offset, uint64_t value)
-{
-	memcpy((uint8_t *)base + offset, &value, sizeof(value));
-}
-
-/*
- * Endianness-aware memory access helpers
- * These functions use the guest_endian field to determine byte order
- */
-static inline uint16_t
-emu_mem_guest_read16(struct emu_guest_mem *mem, uint64_t offset)
-{
-	uint16_t val = emu_mem_raw_read16(mem->base, offset);
-
-	if (mem->guest_endian == EMU_ENDIAN_BIG)
-		return (be16toh(val));
-	return (le16toh(val));
-}
-
-static inline uint32_t
-emu_mem_guest_read32(struct emu_guest_mem *mem, uint64_t offset)
-{
-	uint32_t val = emu_mem_raw_read32(mem->base, offset);
-
-	if (mem->guest_endian == EMU_ENDIAN_BIG)
-		return (be32toh(val));
-	return (le32toh(val));
-}
-
-static inline uint64_t
-emu_mem_guest_read64(struct emu_guest_mem *mem, uint64_t offset)
-{
-	uint64_t val = emu_mem_raw_read64(mem->base, offset);
-
-	if (mem->guest_endian == EMU_ENDIAN_BIG)
-		return (be64toh(val));
-	return (le64toh(val));
-}
-
-static inline void
-emu_mem_guest_write16(struct emu_guest_mem *mem, uint64_t offset, uint16_t value)
-{
-	if (mem->guest_endian == EMU_ENDIAN_BIG)
-		value = htobe16(value);
-	else
-		value = htole16(value);
-	emu_mem_raw_write16(mem->base, offset, value);
-}
-
-static inline void
-emu_mem_guest_write32(struct emu_guest_mem *mem, uint64_t offset, uint32_t value)
-{
-	if (mem->guest_endian == EMU_ENDIAN_BIG)
-		value = htobe32(value);
-	else
-		value = htole32(value);
-	emu_mem_raw_write32(mem->base, offset, value);
-}
-
-static inline void
-emu_mem_guest_write64(struct emu_guest_mem *mem, uint64_t offset, uint64_t value)
-{
-	if (mem->guest_endian == EMU_ENDIAN_BIG)
-		value = htobe64(value);
-	else
-		value = htole64(value);
-	emu_mem_raw_write64(mem->base, offset, value);
-}
 
 #endif /* !_EMU_ENGINE_H_ */

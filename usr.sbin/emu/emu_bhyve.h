@@ -29,7 +29,7 @@
 
 #include <sys/types.h>
 #include <sys/capsicum.h>
-#include <sys/capability.h>
+#include <sys/caprights.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "emu_share.h"

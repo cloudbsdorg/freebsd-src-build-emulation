@@ -31,6 +31,8 @@
 #include <sys/fcntl.h>
 #include <sys/mman.h>
 #include <sys/unistd.h>
+#include <unistd.h>
+#include <libgen.h>
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
@@ -45,7 +47,7 @@
  * Virtio Block Device Emulation
  * 
  * Security: I/O only to disk image file, never to host block devices.
- * Path validation prevents access to raw devices (/dev/*).
+ * Path validation prevents access to raw devices - Dev asterisk -.
  * Bounds checking prevents out-of-range I/O.
  */
 

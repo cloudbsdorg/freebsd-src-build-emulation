@@ -31,6 +31,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "emu_dev_rng.h"
 #include "emu_virtqueue.h"
@@ -149,7 +151,7 @@ emu_rng_handle_request(struct emu_rng *rng, void *vq)
 	int is_write;
 	size_t buflen;
 	uint8_t *buf;
-	int error, count;
+	int error;
 
 	if (rng == NULL || vq == NULL)
 		return (EINVAL);

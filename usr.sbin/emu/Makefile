@@ -24,12 +24,13 @@ SRCS+=	emu_dev_net.c
 SRCS+=	emu_dev_rng.c
 SRCS+=	emu_virtqueue.c
 SRCS+=	emu_veriexec.c
-SRCS+=	emu_module.c
+# emu_module.c excluded - requires kernel APIs (use sys/modules/emu_core for kernel module)
 MAN=	emu.8 emu.conf.5
 
 WARNS?=	3
 
 CFLAGS+= -I${.CURDIR}
-# LDADD+=	-lveriexec  # libveriexec not available in build environment
+LIBADD+=	md
+# LIBADD+=	veriexec  # libveriexec not available in build environment
 
 .include <bsd.prog.mk>

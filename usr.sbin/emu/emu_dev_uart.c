@@ -112,13 +112,13 @@ emu_uart_set_console(struct emu_uart *uart,
 int
 emu_uart_receive(struct emu_uart *uart, const char *buf, int len)
 {
-    int i, count;
+    int count;
     
     if (uart == NULL || buf == NULL || len <= 0)
         return (EINVAL);
     
     count = 0;
-    for (i = 0; i < len && uart->u_rx_count < sizeof(uart->u_rx_fifo); i++) {
+    for (size_t i = 0; i < (size_t)len && (size_t)uart->u_rx_count < sizeof(uart->u_rx_fifo); i++) {
         uart->u_rx_fifo[uart->u_rx_head] = buf[i];
         uart->u_rx_head = (uart->u_rx_head + 1) % sizeof(uart->u_rx_fifo);
         uart->u_rx_count++;
@@ -140,7 +140,7 @@ emu_uart_receive(struct emu_uart *uart, const char *buf, int len)
 int
 emu_uart_transmit(struct emu_uart *uart, char *buf, int len)
 {
-    int i, count;
+    int count;
     
     if (uart == NULL || buf == NULL || len <= 0)
         return (0);
@@ -317,7 +317,7 @@ emu_uart_write(struct emu_uart *uart, uint64_t offset, int size, uint64_t value)
     switch (reg) {
     case EMU_UART_TX:
         /* Write to TX FIFO */
-        if (uart->u_tx_count < sizeof(uart->u_tx_fifo)) {
+        if (uart->u_tx_count < (int)sizeof(uart->u_tx_fifo)) {
             uart->u_tx_fifo[uart->u_tx_head] = data;
             uart->u_tx_head = (uart->u_tx_head + 1) % sizeof(uart->u_tx_fifo);
             uart->u_tx_count++;

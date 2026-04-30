@@ -31,6 +31,7 @@
 #include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sysexits.h>
+#include <stdarg.h>
 
 /* Extended exit codes (not in standard sysexits.h) */
 #ifndef EX_EXISTS

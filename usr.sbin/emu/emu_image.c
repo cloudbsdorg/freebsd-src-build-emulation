@@ -26,6 +26,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/stat.h>
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
@@ -39,6 +40,62 @@ extern int g_verbose;
 extern int g_quiet;
 
 #define EMU_IMAGE_DEFAULT_ARCH	"amd64"
+#define EMU_IMAGE_CACHE_DIR	"/var/cache/emu/images"
+
+/*
+ * Stub implementations for image management functions
+ */
+
+/*
+ * List cached images
+ */
+int
+emu_image_list(void)
+{
+	/* TODO: Implement image listing */
+	fprintf(stderr, "Image listing not implemented yet\n");
+	return (0);
+}
+
+/*
+ * Check if image is cached
+ */
+int
+emu_image_cached(const char *arch, const char *image_name)
+{
+	char path[PATH_MAX];
+	struct stat sb;
+
+	/* TODO: Check if image exists in cache */
+	snprintf(path, sizeof(path), "%s/%s/%s", EMU_IMAGE_CACHE_DIR, arch, image_name);
+	return (stat(path, &sb) == 0 ? 1 : 0);
+}
+
+/*
+ * Remove a cached image
+ */
+int
+emu_image_remove(const char *arch, const char *image_name)
+{
+	char path[PATH_MAX];
+
+	/* TODO: Implement image removal */
+	snprintf(path, sizeof(path), "%s/%s/%s", EMU_IMAGE_CACHE_DIR, arch, image_name);
+	fprintf(stderr, "Image removal not implemented yet: %s\n", path);
+	return (0);
+}
+
+/*
+ * Cleanup old cached images
+ */
+int
+emu_image_cleanup(int max_age_days)
+{
+	/* TODO: Implement cleanup of old images */
+	(void)max_age_days;
+	fprintf(stderr, "Image cleanup not implemented yet\n");
+	return (0);
+}
 
 /*
  * emu image - Manage base disk images for emulation framework
