@@ -1,0 +1,461 @@
+.\"-
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" Copyright (c) 2026 Mark LaPointe <mark@cloudbsd.org>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in
+.\"    the documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+.\" STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+.\" ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+.\" POSSIBILITY OF SUCH DAMAGE.
+.\"
+.Dd April 30, 2026
+.Dt EMU 8
+.Os
+.Sh NAME
+.Nm emu
+.Nd FreeBSD kernel emulation framework management tool
+.Sh SYNOPSIS
+.Nm
+.Op Fl v
+.Op Fl q
+.Op Fl o Ar format
+.Op Fl g Ar gid
+.Ar command
+.Op Ar arguments
+.Sh DESCRIPTION
+The
+.Nm
+tool provides a unified command-line interface for managing emulated
+instances of different architectures on
+.Fx .
+It supports both native virtualization via
+.Xr bhyve 4
+and pure software emulation for cross-architecture testing on
+.Fx .
+.Pp
+The emulation framework allows safe testing of kernel modules without
+risking system stability, enables testing of non-native architectures,
+and provides isolated environments for kernel development.
+.Sh GLOBAL OPTIONS
+.Bl -tag -width Ds
+.It Fl v , -verbose
+Enable verbose output.
+.It Fl q , -quiet
+Suppress informational output.
+.It Fl o , -output Ar format
+Set output format.
+.Ar format
+can be:
+.Bl -tag -width "text,json,tap,junit" -compact
+.It text
+Human-readable text output (default)
+.It json
+JSON output for machine parsing
+.It tap
+Test Anything Protocol output
+.It junit
+JUnit XML format for CI/CD integration
+.El
+.It Fl g , -emu-group Ar gid
+Specify the emulation group ID for non-root operation.
+The default group is the
+.Pa emu
+group.
+.It Fl h , -help
+Show help message.
+.El
+.Sh COMMANDS
+The following commands are available:
+.Bl -tag -width Ds
+.It Xo
+.Nm emu
+.Ar init
+.Op Fl a Ar arch
+.Op Fl c Ar level
+.Op Fl m Ar size
+.Op Fl n Ar name
+.Op Fl s Ar sockets
+.Op Fl v
+.Xc
+Initialize a new emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl a Ar arch
+Target architecture (amd64, i386, arm64, arm, powerpc, riscv)
+.It Fl c Ar level
+CPU compatibility level (1-3)
+.It Fl m Ar size
+Memory size (64M-64G, e.g., 512M, 2G)
+.It Fl n Ar name
+Instance name
+.It Fl s Ar sockets
+Number of CPU sockets (1-8)
+.El
+.Pp
+Creates a new emulated instance with the specified configuration.
+If no name is provided, one is auto-generated.
+.It Xo
+.Nm emu
+.Ar start
+.Op Fl m Ar mode
+.Op Fl n Ar name
+.Op Fl v
+.Xc
+Start an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl m Ar mode
+Execution mode (auto, bhyve, emulator)
+.It Fl n Ar name
+Instance name
+.It Fl v
+Verbose output
+.El
+.Pp
+Starts the specified instance.
+The execution mode is automatically selected based on host and target
+architecture unless explicitly specified.
+.It Xo
+.Nm emu
+.Ar stop
+.Op Fl f
+.Op Fl n Ar name
+.Op Fl t Ar timeout
+.Op Fl v
+.Xc
+Stop an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl f
+Force stop (SIGKILL)
+.It Fl n Ar name
+Instance name
+.It Fl t Ar timeout
+Shutdown timeout in seconds (default: 30)
+.It Fl v
+Verbose output
+.El
+.Pp
+Gracefully stops the instance by sending SIGTERM first,
+then SIGKILL if it does not stop within the timeout.
+.It Xo
+.Nm emu
+.Ar status
+.Op Fl n Ar name
+.Op Fl o Ar format
+.Op Fl v
+.Xc
+Show status of an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl n Ar name
+Instance name
+.It Fl o Ar format
+Output format (text, json)
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar list
+.Op Fl a Ar arch
+.Op Fl s Ar status
+.Op Fl o Ar format
+.Op Fl v
+.Xc
+List all emulated instances.
+.Bl -tag -width Fl -compact
+.It Fl a Ar arch
+Filter by architecture
+.It Fl s Ar status
+Filter by status (running, stopped, paused, error)
+.It Fl o Ar format
+Output format (text, json)
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar destroy
+.Op Fl f
+.Op Fl n Ar name
+.Op Fl v
+.Xc
+Destroy an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl f
+Force destruction without confirmation
+.It Fl n Ar name
+Instance name
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar console
+.Op Fl m Ar mode
+.Op Fl n Ar name
+.Xc
+Display instance console output.
+.Bl -tag -width Fl -compact
+.It Fl m Ar mode
+Console mode (tail, follow, dump)
+.It Fl n Ar name
+Instance name
+.El
+.Pp
+Modes:
+.Bl -tag -width "follow" -compact
+.It tail
+Show last 100 lines
+.It follow
+Continuously show new output (Ctrl+C to exit)
+.It dump
+Show complete console buffer
+.El
+.It Xo
+.Nm emu
+.Ar load
+.Op Fl n Ar name
+.Op Fl v
+.Ar module_path
+.Xc
+Load a kernel module into an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl n Ar name
+Instance name
+.It Fl v
+Verbose output
+.It Ar module_path
+Path to kernel module (.ko file)
+.El
+.It Xo
+.Nm emu
+.Ar unload
+.Op Fl n Ar name
+.Op Fl v
+.Ar module_name
+.Xc
+Unload a kernel module from an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl n Ar name
+Instance name
+.It Fl v
+Verbose output
+.It Ar module_name
+Name of the module to unload
+.El
+.It Xo
+.Nm emu
+.Ar stack
+.Op Fl c Ar count
+.Op Fl f Ar format
+.Op Fl n Ar name
+.Op Fl v
+.Xc
+Examine kernel stack trace from an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl c Ar count
+Number of frames to capture (1-100, default: 20)
+.It Fl f Ar format
+Output format (text, json)
+.It Fl n Ar name
+Instance name
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar test
+.Op Fl n Ar name
+.Op Fl t Ar timeout
+.Op Fl v
+.Xc
+Run tests in an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl n Ar name
+Instance name
+.It Fl t Ar timeout
+Test timeout in seconds (default: 300)
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar snapshot
+.Op Fl n Ar name
+.Op Fl s Ar snapshot_name
+.Op Fl v
+.Xc
+Create a snapshot of an emulated instance.
+.Bl -tag -width Fl -compact
+.It Fl n Ar name
+Instance name
+.It Fl s Ar snapshot_name
+Snapshot name (optional, auto-generated if not specified)
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar restore
+.Op Fl n Ar name
+.Op Fl s Ar snapshot_name
+.Op Fl v
+.Xc
+Restore an emulated instance from a snapshot.
+.Bl -tag -width Fl -compact
+.It Fl n Ar name
+Instance name
+.It Fl s Ar snapshot_name
+Snapshot name
+.It Fl v
+Verbose output
+.El
+.It Xo
+.Nm emu
+.Ar blob
+.Ar command
+.Op Ar arguments
+.Xc
+Manage firmware blobs.
+.Bl -tag -width "blob command" -compact
+.It Cm list
+List available blobs
+.It Cm download Ar name
+Download a blob
+.It Cm verify Ar name
+Verify blob integrity (SHA-256)
+.It Cm verify-gpg Ar name
+Verify blob GPG signature
+.It Cm check-version Ar name
+Check blob version against vulnerability database
+.It Cm delete Ar name
+Delete a blob
+.It Cm info Ar name
+Show blob information
+.El
+.It Xo
+.Nm emu
+.Ar image
+.Ar command
+.Op Ar arguments
+.Xc
+Manage base disk images.
+.Bl -tag -width "image command" -compact
+.It Cm list
+List available images
+.It Cm create Ar name
+Create a new image
+.It Cm delete Ar name
+Delete an image
+.It Cm info Ar name
+Show image information
+.El
+.It Nm emu help
+.Op Ar command
+Show help message.
+If
+.Ar command
+is specified, show detailed help for that command.
+.It Nm emu version
+Show version information.
+.El
+.Sh ARCHITECTURES
+The emulation framework supports the following architectures:
+.Bl -tag -width "powerpc" -compact
+.It amd64
+x86-64 (64-bit)
+.It i386
+x86 (32-bit)
+.It arm64
+AArch64 (64-bit ARM)
+.It arm
+ARM (32-bit)
+.It powerpc
+PowerPC
+.It riscv
+RISC-V (64-bit)
+.El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /etc/emu.conf
+Default configuration file
+.It Pa ~/.config/emu/
+User-specific configuration directory
+.It Pa /var/emu/
+System-wide instance data directory
+.It Pa /var/emu/instances/
+Per-instance data directories
+.It Pa /var/emu/blob-cache/
+Downloaded firmware blob cache
+.It Pa /var/emu/images/
+Base disk images
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+Create and start an amd64 emulation instance:
+.Bd -literal -offset indent
+$ emu init -a amd64 -m 1G -n mytest
+$ emu start -n mytest
+.Ed
+.Pp
+Run tests in an emulated arm64 instance:
+.Bd -literal -offset indent
+$ emu init -a arm64 -n armtest
+$ emu start -n armtest
+$ emu load -n armtest /path/to/test_module.ko
+$ emu test -n armtest
+$ emu stop -n armtest
+.Ed
+.Pp
+Create and restore a snapshot:
+.Bd -literal -offset indent
+$ emu snapshot -n mytest -s before_experiment
+$ emu load -n mytest /path/to/risky_module.ko
+$ emu restore -n mytest -s before_experiment
+.Ed
+.Pp
+List all instances in JSON format:
+.Bd -literal -offset indent
+$ emu list -o json
+.Ed
+.Pp
+Manage firmware blobs:
+.Bd -literal -offset indent
+$ emu blob list
+$ emu blob download seabios
+$ emu blob verify seabios
+.Ed
+.Sh SEE ALSO
+.Bl -tag -width Ds -compact
+.It Xr bhyve 4
+Native virtualization
+.It Xr vmm 4
+Virtual Machine Monitor
+.It Xr kldload 8
+Kernel module loader
+.El
+.Sh HISTORY
+The
+.Nm
+tool first appeared in
+.Fx 15.0 .
+.Sh AUTHORS
+.An Mark LaPointe Aq Mt mark@cloudbsd.org
+.Sh BUGS
+Report bugs at
+.Lk https://github.com/freebsd/freebsd-src/issues
