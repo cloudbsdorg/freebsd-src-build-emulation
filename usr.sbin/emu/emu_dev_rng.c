@@ -33,6 +33,7 @@
 #include <errno.h>
 
 #include "emu_dev_rng.h"
+#include "emu_virtqueue.h"
 
 /*
  * virtio-rng Device Emulation
@@ -141,9 +142,14 @@ emu_rng_get_config(struct emu_rng *rng, uint64_t offset, int size,
 int
 emu_rng_handle_request(struct emu_rng *rng, void *vq)
 {
-	void *buf;
-	size_t len;
-	int error;
+	struct emu_virtqueue *evq;
+	uint16_t desc_idx, descs[EMU_VQ_MAX_CHAIN];
+	uint64_t addr;
+	uint32_t len;
+	int is_write;
+	size_t buflen;
+	uint8_t *buf;
+	int error, count;
 
 	if (rng == NULL || vq == NULL)
 		return (EINVAL);
@@ -151,33 +157,88 @@ emu_rng_handle_request(struct emu_rng *rng, void *vq)
 	if (!rng->rng_initialized)
 		return (ENXIO);
 
+	evq = (struct emu_virtqueue *)vq;
+
 	/*
-	 * Get request buffer from virtqueue.
+	 * Get next available descriptor chain from virtqueue.
+	 * For virtio-rng, the guest typically sends a single buffer
+	 * descriptor for the device to fill with random data.
+	 */
+	error = emu_vq_get_chain(evq, &desc_idx, descs, EMU_VQ_MAX_CHAIN);
+	if (error != 0) {
+		/* No requests available - this is normal */
+		return (0);
+	}
+
+	/*
+	 * Get buffer information from first descriptor.
+	 * The buffer should be marked as writable (device writes to it).
+	 */
+	error = emu_vq_get_desc(evq, desc_idx, &addr, &len, &is_write);
+	if (error != 0) {
+		rng->rng_errors++;
+		emu_vq_return(evq, desc_idx, 0);
+		return (error);
+	}
+
+	/*
+	 * For RNG, we expect a writable buffer.
 	 * The buffer descriptor contains the guest physical address
 	 * and length of the destination buffer.
 	 */
-	error = 0; /* Placeholder for virtqueue operation */
-	if (error != 0) {
+	if (!is_write) {
+		/* Guest didn't provide a writable buffer - error */
 		rng->rng_errors++;
-		return (error);
+		emu_vq_return(evq, desc_idx, 0);
+		return (EINVAL);
 	}
 
 	/*
 	 * Limit request size to prevent DoS.
 	 * Maximum EMU_RNG_MAX_BYTES per request.
 	 */
-	if (len > EMU_RNG_MAX_BYTES)
-		len = EMU_RNG_MAX_BYTES;
+	buflen = len;
+	if (buflen > EMU_RNG_MAX_BYTES)
+		buflen = EMU_RNG_MAX_BYTES;
+
+	/*
+	 * Allocate temporary buffer for random data.
+	 * In a real implementation with VM integration, this would
+	 * write directly to guest memory.
+	 */
+	buf = malloc(buflen);
+	if (buf == NULL) {
+		rng->rng_errors++;
+		emu_vq_return(evq, desc_idx, 0);
+		return (ENOMEM);
+	}
 
 	/*
 	 * Generate cryptographically secure random bytes.
 	 * arc4random_buf() provides high-quality entropy from
 	 * FreeBSD's kernel CSPRNG.
 	 */
-	arc4random_buf(buf, len);
+	arc4random_buf(buf, buflen);
 
+	/*
+	 * Write random data to guest buffer.
+	 * Note: In userspace emulation without VM, this simulates
+	 * the write. In bhyve integration, this would use
+	 * vm_copy_setup() and actual memory mapping.
+	 */
+	/* Simulated: buf contains random data to write to guest */
+
+	/*
+	 * Return the descriptor to the used ring indicating
+	 * we've written 'buflen' bytes.
+	 */
+	emu_vq_return(evq, desc_idx, buflen);
+
+	/* Update statistics */
 	rng->rng_requests++;
-	rng->rng_bytes_provided += len;
+	rng->rng_bytes_provided += buflen;
+
+	free(buf);
 
 	return (0);
 }
