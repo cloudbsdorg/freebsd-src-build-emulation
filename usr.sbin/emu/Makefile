@@ -49,6 +49,10 @@ CFLAGS+= -DCROSS_COMPILING
 CFLAGS+= -DEMU_BHYVE_SUPPORT
 .endif
 LIBADD+= md
-# LDADD+=	-lveriexec  # libveriexec not available in build environment
+# libveriexec is built in lib/libveriexec
+# Add the path to find it during build
+CWARNFLAGS+= -I${SRCTOP}/lib/libveriexec
+LDADD+= -L${OBJTOP}/lib/libveriexec -lveriexec
+DPADD+= ${LIBCRYPTO}
 
 .include <bsd.prog.mk>

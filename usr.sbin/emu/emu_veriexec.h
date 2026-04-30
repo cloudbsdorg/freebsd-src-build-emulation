@@ -38,6 +38,15 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <limits.h>
+
+/*
+ * Get the maximum label length from mac_veriexec header.
+ * Define it here if not available.
+ */
+#ifndef MAXLABELLEN
+#define	MAXLABELLEN	128
+#endif
 
 /* Veriexec status flags */
 #define	EMU_VERIEXEC_TRUSTED	0x01
@@ -83,5 +92,19 @@ int emu_veriexec_status(const char *path, uint32_t *status);
 
 /* List all registered executables */
 int emu_veriexec_list(char **list, int max_items);
+
+/*
+ * Self-verification
+ */
+
+/* Verify the emulator binary itself */
+int emu_veriexec_self_check(const char *progpath);
+
+/*
+ * Cleanup
+ */
+
+/* Cleanup veriexec subsystem */
+void emu_veriexec_fini(void);
 
 #endif /* !_EMU_VERIEXEC_H_ */
