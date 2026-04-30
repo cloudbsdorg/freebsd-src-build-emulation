@@ -10,6 +10,19 @@ newline.  Entries should be separated by a newline.
 
 Changes to this file should not be MFCed.
 
+XXXXXXXXXXXX:
+	The FreeBSD emulation framework provides a unified mechanism for running
+	emulated instances of different architectures on FreeBSD.  It supports
+	both native virtualization via bhyve and pure software emulation for
+	multi-architecture testing.  The framework includes kernel modules
+	(emu_core, emu_amd64, emu_i386, emu_arm64, emu_arm, emu_powerpc,
+	emu_riscv) and a userland management tool.  Administrators can use
+	`emu init`, `emu start`, and `emu stop` to manage instances, while
+	developers can use `emu load` to test kernel modules in an isolated
+	environment.  See emu(8), emu.conf(5), and emulation(4) for details.
+	Kernel configuration requires setting `options MK_EMULATION` in the
+	kernel configuration file.
+
 4c486fe40267:
 	The multicast routing modules, ip_mroute and ip6_mroute, are now FIB-aware.
 	That is, there is a multicast routing table per FIB, rather than a global

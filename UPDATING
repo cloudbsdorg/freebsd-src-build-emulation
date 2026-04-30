@@ -27,6 +27,35 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 16.x IS SLOW:
 	world, or to merely disable the most expensive debugging functionality
 	at runtime, run "ln -s 'abort:false,junk:false' /etc/malloc.conf".)
 
+20260430:
+	The FreeBSD emulation framework has been added to the base system.
+	This framework provides a unified mechanism for running emulated
+	instances of different architectures on FreeBSD.  It supports both
+	native virtualization via bhyve and pure software emulation for
+	multi-architecture testing.
+
+	To enable the emulation framework, add the following to your kernel
+	configuration file:
+
+		options MK_EMULATION
+
+	The framework is disabled by default.  To use it:
+
+	- Load the kernel module: `kldload emu`
+	- Create an instance: `emu init -a amd64 -m 512M -n test`
+	- Start the instance: `emu start -n test`
+	- Access console: `emu console -n test`
+	- Stop the instance: `emu stop -n test`
+
+	Configuration is in `/usr/local/etc/emu/emu.conf` (or
+	`~/.config/emu/emu.conf` for per-user settings).  See emu(8),
+	emu.conf(5), and emulation(4) for details.
+
+	The framework creates sysctl nodes under `kern.emulation` for
+	monitoring and configuration.  Non-root users in the `emu` group
+	can use the framework when `kern.emulation.allow_nonroot` is set
+	to 1.
+
 20260412:
 	The /etc/rc.d/NETWORKING script no longer provides the legacy
 	NETWORK alias. Third-party or local RC scripts that still use
