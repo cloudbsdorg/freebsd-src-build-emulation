@@ -1,0 +1,229 @@
+.\"-
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" Copyright (c) 2026 Mark LaPointe <mark@cloudbsd.org>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in
+.\"    the documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+.\" STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+.\" ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+.\" POSSIBILITY OF SUCH DAMAGE.
+.\"
+.Dd April 30, 2026
+.Dt EMU.CONF 5
+.Os
+.Sh NAME
+.Nm emu.conf
+.Nd FreeBSD emulation framework configuration file
+.Sh SYNOPSIS
+.Nm
+.Sh DESCRIPTION
+The
+.Nm
+file contains configuration settings for the
+.Fx
+emulation framework.
+It uses a simple
+.Va key=value
+format with one setting per line.
+Lines starting with
+.Ql #
+or empty lines are treated as comments and ignored.
+.Pp
+The configuration file supports both system-wide and per-user settings:
+.Bl -tag -width Ds -compact
+.It Pa /usr/local/etc/emu/emu.conf
+System-wide configuration (set during installation)
+.It Pa ~/.config/emu/emu.conf
+Per-user configuration (overrides system settings)
+.El
+.Pp
+Settings in the per-user configuration file override the system-wide
+defaults.
+.Sh CONFIGURATION OPTIONS
+The following configuration options are supported:
+.Ss Instance Management
+.Bl -tag -width Fl -compact
+.It Va instance_dir No = Ar path
+Directory for storing emulation instance data.
+The default is
+.Pa /var/emu .
+.It Va image_cache_dir No = Ar path
+Directory for caching emulation disk images.
+The default is
+.Pa /var/cache/emu/images .
+.El
+.Ss Default Instance Settings
+.Bl -tag -width Fl -compact
+.It Va default_arch No = Ar arch
+Default target architecture for new instances.
+.Ar arch
+can be:
+.Bl -tag -width "amd64" -compact
+.It amd64
+x86-64 (64-bit)
+.It i386
+x86 (32-bit)
+.It arm64
+AArch64 (64-bit ARM)
+.It arm
+ARM (32-bit)
+.It powerpc
+PowerPC
+.It riscv
+RISC-V (64-bit)
+.El
+The default is
+.Va amd64 .
+.It Va default_mode No = Ar mode
+Default execution mode.
+.Ar mode
+can be:
+.Bl -tag -width "auto" -compact
+.It auto
+Automatically select best mode based on architecture
+.It bhyve
+Use bhyve/VMM virtualization (native architectures only)
+.It emulator
+Use custom software emulator
+.El
+The default is
+.Va auto .
+.It Va default_cpu_level No = Ar level
+Default CPU compatibility level.
+.Ar level
+can be:
+.Bl -tag -width "x86-64-v3" -compact
+.It 1
+Base compatibility level
+.It 2
+Extended features (SSE4, POPCOUNT)
+.It 3
+Maximum features (AVX2, BMI2)
+.El
+The meaning varies by architecture.
+.It Va default_cpu_speed_mhz No = Ar speed
+Default CPU speed in MHz.
+Use
+.Va 0
+for auto-detection.
+The default is
+.Va 0 .
+.It Va default_memory No = Ar size
+Default memory size for new instances.
+.Ar size
+can be specified with optional suffix:
+.Bl -tag -width "512M" -compact
+.It 256M
+256 megabytes
+.It 1G
+1 gigabyte
+.It 2G
+2 gigabytes
+.El
+The default is
+.Va 256M .
+.It Va default_cpus No = Ar count
+Default number of virtual CPUs.
+The default is
+.Va 1 .
+.El
+.Ss Output Settings
+.Bl -tag -width Fl -compact
+.It Va output_format No = Ar format
+Default output format for commands.
+.Ar format
+can be:
+.Bl -tag -width "json" -compact
+.It text
+Human-readable text output (default)
+.It json
+JSON output for machine parsing
+.It tap
+Test Anything Protocol
+.It junit
+JUnit XML format
+.El
+.It Va verbose No = Ar value
+Enable verbose output.
+.Ar value
+can be:
+.Bl -tag -width "yes" -compact
+.It yes
+Enable verbose output
+.It true
+Enable verbose output
+.It 1
+Enable verbose output
+.El
+The default is
+.Va no .
+.El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /usr/local/etc/emu/emu.conf
+System-wide configuration file
+.It Pa ~/.config/emu/emu.conf
+Per-user configuration file
+.It Pa /var/emu/
+Default instance data directory
+.It Pa /var/cache/emu/images/
+Default image cache directory
+.El
+.Sh EXAMPLES
+.Bd -literal -offset indent
+# emu.conf - FreeBSD Emulation Framework Configuration
+
+# Instance directories
+instance_dir=/var/emu
+image_cache_dir=/var/cache/emu/images
+
+# Default settings for new instances
+default_arch=amd64
+default_mode=auto
+default_memory=512M
+default_cpus=2
+
+# CPU compatibility level (1-3)
+default_cpu_level=2
+
+# Output format (text, json, tap, junit)
+output_format=text
+
+# Enable verbose output (yes, true, or 1)
+verbose=no
+.Ed
+.Pp
+To use arm64 as the default architecture:
+.Bd -literal -offset indent
+default_arch=arm64
+default_memory=1G
+default_cpus=4
+.Ed
+.Sh SEE ALSO
+.Xr emu 8
+.Sh HISTORY
+The
+.Nm
+configuration file first appeared in
+.Fx 15.0 .
+.Sh AUTHORS
+.An Mark LaPointe Aq Mt mark@cloudbsd.org
+.Sh BUGS
+Report bugs at
+.Lk https://github.com/freebsd/freebsd-src/issues
