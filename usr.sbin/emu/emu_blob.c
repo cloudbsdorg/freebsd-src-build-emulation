@@ -35,6 +35,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <libsecureboot/libsecureboot.h>
+#include <libsecureboot/openpgp/packet.h>
 
 #include "emu.h"
 
@@ -232,6 +234,112 @@ emu_cmd_blob(int argc, char *argv[])
 		if (!g_quiet)
 			printf("Firmware blob '%s' verified successfully (SHA-256: %s)\n", 
 			    blob_name, computed_hash);
+
+		return (0);
+
+	} else if (strcmp(command, "verify-gpg") == 0) {
+		if (g_verbose)
+			printf("Verifying GPG signature for firmware blob '%s'\n", blob_name);
+
+		/* S19.2: Implement firmware GPG signature verification */
+		char blob_path[PATH_MAX];
+		char sig_path[PATH_MAX];
+		struct stat sb;
+		int fd;
+		void *mmap_ptr;
+		void *sig_ptr;
+		size_t file_size;
+		size_t sig_size;
+		int rc;
+
+		/* Get blob path from sysctl */
+		snprintf(sysctl_name, sizeof(sysctl_name),
+		    "kern.emulation.blob.%s.path", blob_name);
+		error = sysctlbyname(sysctl_name, blob_path, &len, NULL, 0);
+		if (error != 0) {
+			if (errno == ENOENT) {
+				fprintf(stderr, "Blob '%s' not found\n", blob_name);
+			} else {
+				fprintf(stderr, "Failed to get blob path: %s\n", strerror(errno));
+			}
+			return (errno);
+		}
+
+		/* Get signature path from sysctl */
+		snprintf(sysctl_name, sizeof(sysctl_name),
+		    "kern.emulation.blob.%s.sig", blob_name);
+		error = sysctlbyname(sysctl_name, sig_path, &len, NULL, 0);
+		if (error != 0) {
+			fprintf(stderr, "Signature file not available for blob '%s'\n", blob_name);
+			return (errno);
+		}
+
+		/* Open and map blob file */
+		fd = open(blob_path, O_RDONLY);
+		if (fd < 0) {
+			fprintf(stderr, "Failed to open blob file: %s\n", strerror(errno));
+			return (errno);
+		}
+
+		if (fstat(fd, &sb) < 0) {
+			fprintf(stderr, "Failed to stat blob file: %s\n", strerror(errno));
+			close(fd);
+			return (errno);
+		}
+
+		file_size = sb.st_size;
+		mmap_ptr = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+		if (mmap_ptr == MAP_FAILED) {
+			fprintf(stderr, "Failed to mmap blob file: %s\n", strerror(errno));
+			close(fd);
+			return (errno);
+		}
+
+		/* Open and map signature file */
+		int sig_fd = open(sig_path, O_RDONLY);
+		if (sig_fd < 0) {
+			fprintf(stderr, "Failed to open signature file: %s\n", strerror(errno));
+			munmap(mmap_ptr, file_size);
+			close(fd);
+			return (errno);
+		}
+
+		if (fstat(sig_fd, &sb) < 0) {
+			fprintf(stderr, "Failed to stat signature file: %s\n", strerror(errno));
+			munmap(mmap_ptr, file_size);
+			close(fd);
+			close(sig_fd);
+			return (errno);
+		}
+
+		sig_size = sb.st_size;
+		sig_ptr = mmap(NULL, sig_size, PROT_READ, MAP_PRIVATE, sig_fd, 0);
+		if (sig_ptr == MAP_FAILED) {
+			fprintf(stderr, "Failed to mmap signature file: %s\n", strerror(errno));
+			munmap(mmap_ptr, file_size);
+			close(fd);
+			close(sig_fd);
+			return (errno);
+		}
+
+		/* Verify GPG signature using libsecureboot */
+		rc = openpgp_verify(blob_path, mmap_ptr, file_size, 
+		    sig_ptr, sig_size, 0);
+
+		munmap(mmap_ptr, file_size);
+		munmap(sig_ptr, sig_size);
+		close(fd);
+		close(sig_fd);
+
+		if (rc != 0) {
+			fprintf(stderr, "GPG signature verification failed for blob '%s'\n", 
+			    blob_name);
+			return (EAUTH);
+		}
+
+		if (!g_quiet)
+			printf("Firmware blob '%s' GPG signature verified successfully\n", 
+			    blob_name);
 
 		return (0);
 
