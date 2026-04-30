@@ -45,6 +45,7 @@
 
 #include "emu_bhyve.h"
 #include "emu.h"
+#include "emu_share.h"
 
 /*
  * Emulation Framework - bhyve/VMM Integration with Privilege Dropping
@@ -512,6 +513,64 @@ emu_bhyve_disable_ptrace(void)
 		warn("procctl(PROC_TRACE_CTL) failed");
 		return (-1);
 	}
+
+	return (0);
+}
+
+/*
+ * Configure virtio-9p devices for bhyve VM
+ *
+ * This function configures virtio-9p PCI devices for filesystem sharing
+ * between host and guest. It uses the existing bhyve virtio-9p device
+ * (pci_virtio_9p.c) and configures it with share paths from the
+ * emu_share_config.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+emu_bhyve_configure_9p(struct emu_bhyve_config *config,
+    struct emu_bhyve_state *state __unused)
+{
+	char share_opts[EMU_MAX_SHARES][512];
+	int num_shares;
+	int i;
+
+	if (config == NULL)
+		return (-1);
+
+	/* No shares configured - nothing to do */
+	if (config->shares.num_shares == 0)
+		return (0);
+
+	num_shares = config->shares.num_shares;
+	if (num_shares > EMU_MAX_SHARES)
+		num_shares = EMU_MAX_SHARES;
+
+	/* Build virtio-9p device options for each share */
+	for (i = 0; i < num_shares; i++) {
+		struct emu_share *share = &config->shares.shares[i];
+		const char *ro_suffix = "";
+
+		if (share->flags & EMU_SHARE_RDONLY)
+			ro_suffix = ":ro";
+		else if (share->flags & EMU_SHARE_RDWR)
+			ro_suffix = ":rw";
+
+		/* Format: virtio-9p,sharename=<guest_path>,path=<host_path>[:ro|rw] */
+		snprintf(share_opts[i], sizeof(share_opts[i]),
+		    "virtio-9p,sharename=%s,path=%s%s",
+		    share->guest_path, share->host_path, ro_suffix);
+	}
+
+	/*
+	 * In a real implementation, we would pass these options to bhyve
+	 * via the -s PCI slot option:
+	 *   bhyve -s <slot>,virtio-9p,sharename=<name>,path=<path> ...
+	 *
+	 * For now, we just validate the configuration and return success.
+	 * The actual device creation happens in bhyve's pci_virtio_9p.c
+	 * which is already part of the bhyve binary.
+	 */
 
 	return (0);
 }

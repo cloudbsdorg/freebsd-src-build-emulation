@@ -32,6 +32,7 @@
 #include <sys/capability.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "emu_share.h"
 
 /*
  * Emulation Framework - bhyve/VMM Integration
@@ -58,6 +59,7 @@ struct emu_bhyve_config {
 	bool		no_passthrough;	/* No device passthrough */
 	uid_t		target_uid;	/* Target UID for privilege dropping */
 	gid_t		target_gid;	/* Target GID for privilege dropping */
+	struct emu_share_config shares;	/* Filesystem share configuration */
 };
 
 /* bhyve VM state */
@@ -153,5 +155,13 @@ int emu_bhyve_limit_vmm_ioctls(int vmm_fd);
 
 /* Check if FD is essential for bhyve operation */
 bool emu_bhyve_is_essential_fd(int fd);
+
+/*
+ * VirtIO-9p filesystem sharing for bhyve
+ */
+
+/* Configure virtio-9p devices for bhyve VM */
+int emu_bhyve_configure_9p(struct emu_bhyve_config *config,
+    struct emu_bhyve_state *state);
 
 #endif /* !_EMU_BHYVE_H_ */
