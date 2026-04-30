@@ -27,25 +27,40 @@
 #ifndef _EMU_BHYVE_H_
 #define	_EMU_BHYVE_H_
 
-#include <sys/types.h>
-#include "sys_capsicum_compat.h"
-#include <stdint.h>
-#include <stdbool.h>
-#include "emu_share.h"
-
 /*
  * Emulation Framework - bhyve/VMM Integration
  *
  * This module provides bhyve/VMM integration with proper privilege
  * dropping after VM creation for security.
  *
- * Security considerations:
+ * Compile with -DEMU_BHYVE_SUPPORT to enable bhyve support.
+ * Without this flag, stub implementations are used for graceful
+ * degradation on systems without VMM/bhyve.
+ *
+ * Security considerations (when enabled):
  * - Root privileges required only for VM creation
  * - Privileges dropped immediately after VM creation via setuid/setgid
  * - VM process runs as unprivileged user
  * - File descriptors closed after VM creation
  * - No passthrough devices for emulation instances
  */
+
+#ifdef EMU_BHYVE_SUPPORT
+#include <sys/types.h>
+#include "sys_capsicum_compat.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include "emu_share.h"
+#else
+/*
+ * bhyve support is disabled at compile time.
+ * Stub implementations are provided in emu_bhyve_stub.h
+ * for graceful degradation on systems without VMM/bhyve.
+ */
+#include "emu_bhyve_stub.h"
+#endif
+
+#ifdef EMU_BHYVE_SUPPORT
 
 /* bhyve VM configuration */
 struct emu_bhyve_config {
@@ -162,5 +177,7 @@ bool emu_bhyve_is_essential_fd(int fd);
 /* Configure virtio-9p devices for bhyve VM */
 int emu_bhyve_configure_9p(struct emu_bhyve_config *config,
     struct emu_bhyve_state *state);
+
+#endif /* EMU_BHYVE_SUPPORT */
 
 #endif /* !_EMU_BHYVE_H_ */

@@ -1,6 +1,11 @@
 # $FreeBSD$
 
 PROG=	emu
+
+# Enable bhyve/VMM support (set BHYVE_SUPPORT=no to disable)
+# Default is yes to maintain backward compatibility
+BHYVE_SUPPORT?=	yes
+
 SRCS=	emu.c
 SRCS+=	emu_init.c emu_start.c emu_stop.c emu_status.c emu_list.c
 SRCS+=	emu_destroy.c emu_console.c
@@ -13,7 +18,9 @@ SRCS+=	emu_file_sharing.c
 SRCS+=	emu_zfs.c
 SRCS+=	emu_boot.c
 SRCS+=	emu_decoder.c
+.if ${BHYVE_SUPPORT} == "yes"
 SRCS+=	emu_bhyve.c
+.endif
 SRCS+=	emu_crash.c
 SRCS+=	emu_share.c
 SRCS+=	emu_image.c
@@ -36,6 +43,11 @@ CFLAGS+= -I${SRCTOP}/lib/libsecureboot/openpgp
 CFLAGS+= -I${SRCTOP}/contrib/bearssl/inc
 CFLAGS+= -DUSE_BEARSSL
 CFLAGS+= -DCROSS_COMPILING
+
+# Enable bhyve/VMM support (controlled by BHYVE_SUPPORT variable above)
+.if ${BHYVE_SUPPORT} == "yes"
+CFLAGS+= -DEMU_BHYVE_SUPPORT
+.endif
 LIBADD+= md
 # LDADD+=	-lveriexec  # libveriexec not available in build environment
 
