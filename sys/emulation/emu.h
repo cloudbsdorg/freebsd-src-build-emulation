@@ -28,6 +28,8 @@
 #ifndef _SYS_EMU_H_
 #define	_SYS_EMU_H_
 
+#include <sys/malloc.h>
+
 /*
  * Emulation Framework Core Header
  *
@@ -133,6 +135,9 @@ int	emu_check_priv(struct thread *td, int priv);
 int	emu_check_access(struct thread *td, uint64_t inst_id, int perm);
 int	emu_check_create(struct thread *td);
 int	emu_check_destroy(struct thread *td, uint64_t inst_id);
+int	emu_check_share_mac(struct thread *td, uint64_t inst_id, const char *share_path);
+int	emu_check_snapshot_mac(struct thread *td, uint64_t inst_id, const char *snapshot_name);
+int	emu_validate_share_path(struct thread *td, uint64_t inst_id, const char *path);
 
 /* Securelevel integration */
 int	emu_securelevel_check(struct thread *td, int level);

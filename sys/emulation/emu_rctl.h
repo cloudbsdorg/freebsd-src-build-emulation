@@ -19,7 +19,7 @@
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAULD AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
@@ -28,16 +28,13 @@
 /*
  * Emulation Framework rctl Integration
  *
- * This module provides FreeBSD rctl (resource limits) integration for
- * the emulation framework. rctl provides OS-level resource enforcement
- * for processes, users, and login classes.
+ * This module provides resource limit configuration for the emulation framework.
+ * It provides sysctl-based configuration for per-instance resource limits.
+ * Actual enforcement is done via the memory management and sysctl-based limits.
  *
- * Features:
- * - Per-instance memory limits via rctl
- * - Per-instance CPU time limits via rctl
- * - Per-instance process count limits via rctl
- * - Per-user resource aggregation via rctl
- * - Login class limits for emulator processes
+ * Note: FreeBSD's kernel rctl API is internal and not exposed as a public
+ * kernel API. This module provides configuration infrastructure that can
+ * be used with rctl rules set via the userspace rctl command.
  */
 
 #ifndef _EMU_RCTL_H_
@@ -55,14 +52,8 @@
 #define EMU_RCTL_ENFORCED	0x02
 
 /*
- * Initialize rctl integration
- * Returns 0 on success, error code on failure
- */
-int emu_rctl_init(void);
-
-/*
  * Apply rctl limits to an emulator process
- * 
+ *
  * Parameters:
  *   p - process to apply limits to
  *   memory_limit - memory limit in bytes (0 = no limit)
@@ -76,7 +67,7 @@ int emu_rctl_apply(struct proc *p, uint64_t memory_limit,
 
 /*
  * Remove rctl limits from a process
- * 
+ *
  * Parameters:
  *   p - process to remove limits from
  *
@@ -86,64 +77,38 @@ int emu_rctl_remove(struct proc *p);
 
 /*
  * Check if rctl is available and enabled
- * 
+ *
  * Returns bitmask of EMU_RCTL_* flags
  */
 int emu_rctl_status(void);
 
 /*
- * Get current rctl limit for a process
- * 
- * Parameters:
- *   p - process to query
- *   resource - RACCT_* resource type
+ * Get default memory limit
  *
- * Returns current limit, or 0 if not available
+ * Returns default memory limit in bytes
  */
-uint64_t emu_rctl_get_limit(struct proc *p, int resource);
+uint64_t emu_rctl_default_memory(void);
 
 /*
- * Get available (remaining) rctl limit for a process
- * 
- * Parameters:
- *   p - process to query
- *   resource - RACCT_* resource type
+ * Get default CPU time limit
  *
- * Returns available amount, or 0 if not available
+ * Returns default CPU time limit in seconds
  */
-uint64_t emu_rctl_get_available(struct proc *p, int resource);
+uint64_t emu_rctl_default_cpu(void);
 
 /*
- * Update per-user rctl limits based on login class
- * 
- * Parameters:
- *   uid - user ID
- *   loginclass - login class name (NULL for default)
- *   max_instances - maximum instances for user
- *   max_memory - maximum memory for user
+ * Get default max processes
  *
- * Returns 0 on success, error code on failure
+ * Returns default max processes
  */
-int emu_rctl_set_user_limits(uid_t uid, const char *loginclass,
-    int max_instances, uint64_t max_memory);
+int emu_rctl_default_procs(void);
 
 /*
- * Format rctl limit as human-readable string
- * 
- * Parameters:
- *   resource - RACCT_* resource type
- *   amount - amount to format
- *   buf - output buffer
- *   buflen - buffer size
+ * Cleanup on module unload
+ * Called from module modevent handler
  */
-void emu_rctl_format_limit(int resource, uint64_t amount, char *buf,
-    size_t buflen);
-
-/*
- * Get resource name string for RACCT_* type
- */
-const char *emu_rctl_resource_name(int resource);
+void emu_rctl_cleanup(void);
 
 #endif /* _KERNEL */
 
-#endif /* _EMU_RCTL_H_ */
+#endif /* !_EMU_RCTL_H_ */

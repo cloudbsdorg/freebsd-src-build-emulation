@@ -56,6 +56,10 @@
 #include "emu_securelevel.h"
 #include "emu_memmgmt.h"
 #include "emu_rctl.h"
+#include "emu_instance.h"
+
+/* Declare sysctl parent node */
+SYSCTL_DECL(_kern_emulation);
 
 /*
  * Instance resource limits
@@ -211,7 +215,7 @@ emu_get_user_limits(uid_t uid)
  * Check if user can create a new instance
  * Returns 0 on success, error code on failure
  */
-static int
+int
 emu_check_user_limits(uid_t uid, int num_vcpus, uint64_t memory)
 {
 	struct emu_user_limits *ul;
@@ -634,7 +638,6 @@ int
 emu_instance_attach_pid(uint64_t inst_id, pid_t pid)
 {
 	struct emu_instance *inst;
-	int error;
 
 	mtx_lock(&emu_instance_lock);
 
@@ -1105,7 +1108,7 @@ sysctl_emu_max_cpu_time_per_instance(SYSCTL_HANDLER_ARGS)
 	return (0);
 }
 
-SYSCTL_NODE(_kern, OID_AUTO, emulation, CTLFLAG_RD, 0, "Emulation Framework");
+/* Note: SYSCTL_NODE(_kern, ...) is defined in emu_main.c */
 
 SYSCTL_PROC(_kern_emulation, OID_AUTO, max_instances, CTLTYPE_INT | CTLFLAG_RW,
     &emu_max_instances, 0, sysctl_emu_max_instances, "I",

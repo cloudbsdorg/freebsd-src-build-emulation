@@ -67,6 +67,17 @@ struct emu_scrub_config {
 } emu_scrub_cfg;
 
 /*
+ * Forward declaration of memory node from emu_memmgmt.c
+ */
+SYSCTL_DECL(_kern_emulation_memory);
+
+/*
+ * Sysctl handler declarations (forward references)
+ */
+static int emu_scrub_sysctl_enabled(SYSCTL_HANDLER_ARGS);
+static int emu_scrub_sysctl_method(SYSCTL_HANDLER_ARGS);
+
+/*
  * Initialize memory scrubbing subsystem
  */
 void
@@ -79,7 +90,7 @@ emu_scrub_init(void)
 	emu_scrub_cfg.sc_pattern_len = 0;
 
 	/* Initialize sysctl context */
-	SYSCTL_CTX_INIT(&emu_scrub_ctx);
+	sysctl_ctx_init(&emu_scrub_ctx);
 
 	/* Create sysctl tree: kern.emulation.memory.scrub.* */
 	emu_scrub_oid = SYSCTL_ADD_NODE(&emu_scrub_ctx,
@@ -358,5 +369,5 @@ emu_scrub_destroy(void)
 {
 
 	mtx_destroy(&emu_scrub_cfg.sc_lock);
-	SYSCTL_CTX_FREE(&emu_scrub_ctx);
+	sysctl_ctx_free(&emu_scrub_ctx);
 }

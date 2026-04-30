@@ -106,7 +106,7 @@ emu_securelevel_check(struct thread *td, int level)
 	if (jailed(cred)) {
 		error = securelevel_gt(cred, level);
 		if (error != 0) {
-			emu_audit_log(EMU_AUDIT_EVENT_PERM_DENIED, EMU_AUDIT_SEVERITY_WARNING,
+			emu_audit_log(EMU_AUDIT_EVENT_PERMISSION_DENIED, EMU_AUDIT_SEVERITY_WARNING,
 			    "securelevel_check", "jail securelevel %d > requested level %d",
 			    cred->cr_prison->pr_securelevel, level);
 			return (error);
@@ -117,7 +117,7 @@ emu_securelevel_check(struct thread *td, int level)
 	/* Check system securelevel */
 	error = securelevel_gt(cred, level);
 	if (error != 0) {
-		emu_audit_log(EMU_AUDIT_EVENT_PERM_DENIED, EMU_AUDIT_SEVERITY_WARNING,
+		emu_audit_log(EMU_AUDIT_EVENT_PERMISSION_DENIED, EMU_AUDIT_SEVERITY_WARNING,
 		    "securelevel_check", "system securelevel > requested level %d", level);
 		return (error);
 	}

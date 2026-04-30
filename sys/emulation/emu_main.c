@@ -40,7 +40,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/ucred.h>
 #include <sys/syslog.h>
 #include "emu.h"
+#include "emu_sysctl.h"
 #include "emu_securelevel.h"
+#include "emu_instance.h"
 
 MALLOC_DEFINE(M_EMU, "emu", "Emulation framework memory");
 
@@ -77,27 +79,15 @@ static const char *emu_conflicting_modules[] = {
 static int
 emu_check_conflicts(void)
 {
-	struct module *mod;
 	int i;
 
 	for (i = 0; emu_conflicting_modules[i] != NULL; i++) {
-		if (module_lookup(emu_conflicting_modules[i]) != NULL) {
+		if (module_lookupbyname(emu_conflicting_modules[i]) != NULL) {
 			printf("emu_core: WARNING: Conflicting module '%s' is loaded\n",
 			    emu_conflicting_modules[i]);
 			printf("emu_core: The emulation framework may not function "
 			    "correctly with this module.\n");
 			/* Continue loading but warn - conflicts may be benign */
-		}
-	}
-
-	/* Check for running bhyve instances via sysctl */
-	int bhyve_instances = 0;
-	size_t len = sizeof(bhyve_instances);
-	if (kernel_sysctlbyname("hw.vmm.create", &bhyve_instances, &len, NULL, 0) == 0) {
-		/* vmm module is present, check if instances exist */
-		if (bhyve_instances > 0) {
-			printf("emu_core: WARNING: %d vmm/bhyve instance(s) detected\n",
-			    bhyve_instances);
 		}
 	}
 
@@ -127,14 +117,14 @@ MODULE_VERSION(emu_core, EMU_CORE_VERSION);
 
 /*
  * Instance Registry
+ * Note: emu_instance_lock is defined in emu_instance.c
  */
-static struct mtx emu_instance_lock;
 static int emu_num_instances = 0;
 
 /*
  * Sysctl OID tree for emulation framework
  */
-static SYSCTL_NODE(_kern, OID_AUTO, emulation, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+SYSCTL_NODE(_kern, OID_AUTO, emulation, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "Emulation Framework");
 
 /*

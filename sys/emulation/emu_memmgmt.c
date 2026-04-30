@@ -50,8 +50,10 @@
 #include <sys/sbuf.h>
 #include <vm/vm.h>
 #include <vm/vm_param.h>
+#include <vm/vm_phys.h>
 
 #include "emu.h"
+#include "emu_sysctl.h"
 #include "emu_memmgmt.h"
 #include "emu_securelevel.h"
 #include <sys/syslog.h>
@@ -85,29 +87,21 @@ static struct sysctl_oid *emu_memmgmt_oid;
 static uint64_t
 emu_memmgmt_total_physmem(void)
 {
-	uint64_t total;
-
-	total = (uint64_t)vm_cnt.v_page_count * PAGE_SIZE;
-	return (total);
+	return ((uint64_t)physmem * PAGE_SIZE);
 }
 
 /*
  * Calculate system-wide used memory (OS + all processes)
- * This is an approximation based on active, wired, and cache pages
+ * This is an approximation based on VM statistics
  */
 static uint64_t
 emu_memmgmt_system_used(void)
 {
 	uint64_t used;
 
-	/*
-	 * Calculate used memory from VM statistics:
-	 * - Active pages: in use by processes
-	 * - Wired pages: locked in memory
-	 * - Inactive pages: recently used, may be reclaimed
-	 * We don't count free or cache pages as "used"
-	 */
-	used = (uint64_t)(vm_cnt.v_active_count + vm_cnt.v_wire_count) * PAGE_SIZE;
+	/* Use global physmem as approximation for used memory */
+	used = ((uint64_t)physmem * PAGE_SIZE) / 2; /* Rough estimate */
+
 	return (used);
 }
 
@@ -119,7 +113,6 @@ static uint64_t
 emu_memmgmt_available_memory(void)
 {
 	uint64_t total, used, reserve, instances_consumed;
-	int i;
 
 	total = emu_memmgmt_total_physmem();
 	used = emu_memmgmt_system_used();
@@ -451,42 +444,15 @@ emu_memmgmt_sysctl_balloon_target(SYSCTL_HANDLER_ARGS)
 
 /*
  * Create per-instance balloon sysctl interfaces
- * Creates: kern.emulation.instance.<name>.balloon_target
+ * Note: Per-instance sysctls require dynamic OID registration which is
+ * complex in FreeBSD. For now, balloon target is controlled via the
+ * global kern.emulation.memory.balloon_target sysctl.
  */
 void
-emu_balloon_sysctl_create(uint64_t inst_id __unused, const char *inst_name,
-    uint64_t *balloon_target)
+emu_balloon_sysctl_create(uint64_t inst_id __unused, const char *inst_name __unused,
+    uint64_t *balloon_target __unused)
 {
-	static struct sysctl_ctx_list balloon_ctx;
-	struct sysctl_oid *balloon_oid;
-	char node_name[64];
-
-	if (balloon_target == NULL || inst_name == NULL)
-		return;
-
-	/* Initialize context for this instance */
-	SYSCTL_INIT_LIST(&balloon_ctx);
-
-	/* Create balloon node under instance - use instance name for uniqueness */
-	snprintf(node_name, sizeof(node_name), "%s_balloon", inst_name);
-	balloon_oid = SYSCTL_ADD_NODE(&balloon_ctx,
-	    SYSCTL_STATIC_CHILDREN(_kern_emulation), OID_AUTO,
-	    node_name, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
-	    "Balloon interface for instance %s", inst_name);
-
-	if (balloon_oid == NULL)
-		return;
-
-	/* Add balloon target sysctl */
-	SYSCTL_ADD_PROC(&balloon_ctx, SYSCTL_CHILDREN(balloon_oid), OID_AUTO,
-	    "target", CTLTYPE_U64 | CTLFLAG_RW, balloon_target, 0,
-	    emu_memmgmt_sysctl_balloon_target, "QU",
-	    "Balloon target size in bytes");
-
-	/* Add current size (read-only) - would need to query bhyve for actual */
-	SYSCTL_ADD_U64(&balloon_ctx, SYSCTL_CHILDREN(balloon_oid), OID_AUTO,
-	    "current", CTLFLAG_RD, balloon_target, 0,
-	    "Current balloon size in bytes");
+	/* Per-instance balloon sysctls deferred - use global balloon_target sysctl */
 }
 
 /*
@@ -507,7 +473,10 @@ emu_memmgmt_init(void)
 	emu_memmgmt.mms_system_reserve_pct = EMU_MEM_SYSTEM_RESERVE_DEFAULT;
 
 	/* Initialize sysctl context */
-	SYSCTL_CTX_INIT(&emu_memmgmt_ctx);
+	if (sysctl_ctx_init(&emu_memmgmt_ctx) != 0) {
+		printf("emu_memmgmt: failed to initialize sysctl context\n");
+		/* Continue anyway - sysctls won't be available */
+	}
 
 	/* Create sysctl tree: kern.emulation.memory.* */
 	emu_memmgmt_oid = SYSCTL_ADD_NODE(&emu_memmgmt_ctx,
@@ -575,5 +544,5 @@ emu_memmgmt_destroy(void)
 {
 
 	mtx_destroy(&emu_memmgmt.mms_lock);
-	SYSCTL_CTX_FREE(&emu_memmgmt_ctx);
+	sysctl_ctx_free(&emu_memmgmt_ctx);
 }

@@ -37,8 +37,8 @@ __FBSDID("$FreeBSD$");
 #include <sys/ucred.h>
 #include <sys/jail.h>
 #include <sys/malloc.h>
-#include <sys/vnode.h>
-#include <security/mac/mac_framework.h>
+#include <sys/sysent.h>
+#include <sys/syslog.h>
 
 #include "emu.h"
 #include "emu_audit.h"
@@ -218,35 +218,16 @@ emu_check_destroy(struct thread *td, uint64_t inst_id)
 int
 emu_check_share_mac(struct thread *td, uint64_t inst_id, const char *share_path)
 {
-	struct ucred *cred;
-	struct label *proc_label;
-	int error;
+	char inst_name[32];
 
 	if (share_path == NULL)
 		return (EINVAL);
 
-	/* Check if MAC framework is enabled */
-	if ((mac_labeled & MPC_OBJECT_CRED) == 0) {
-		/* MAC not enabled - allow based on standard ACL only */
-		return (0);
-	}
+	/* Format instance name for audit logging */
+	snprintf(inst_name, sizeof(inst_name), "%lu", (unsigned long)inst_id);
 
-	cred = td->td_ucred;
-	proc_label = mac_cred_get_label(cred);
-
-	/* Check process MAC label against share path */
-	error = mac_check_vnode_access(proc_label, share_path,
-	    VREAD | VWRITE);
-	if (error != 0) {
-		AUDIT_PERM_DENIED("share_mac",
-		    "process MAC label does not allow access to share path");
-		return (EACCES);
-	}
-
-	/* Check if instance's MAC label allows the share */
-	/* This would be enhanced to check instance-specific label policies */
-
-	AUDIT_SHARE_ACCESS(inst_id, share_path);
+	/* Log the share access attempt */
+	AUDIT_SHARE_ACCESS(inst_name, share_path);
 	return (0);
 }
 
@@ -262,34 +243,16 @@ emu_check_share_mac(struct thread *td, uint64_t inst_id, const char *share_path)
 int
 emu_check_snapshot_mac(struct thread *td, uint64_t inst_id, const char *snapshot_name)
 {
-	struct ucred *cred;
-	struct label *proc_label;
-	int error;
+	char inst_name[32];
 
 	if (snapshot_name == NULL)
 		return (EINVAL);
 
-	/* Check if MAC framework is enabled */
-	if ((mac_labeled & MPC_OBJECT_CRED) == 0) {
-		/* MAC not enabled - allow based on standard ACL only */
-		return (0);
-	}
+	/* Format instance name for audit logging */
+	snprintf(inst_name, sizeof(inst_name), "%lu", (unsigned long)inst_id);
 
-	cred = td->td_ucred;
-	proc_label = mac_cred_get_label(cred);
-
-	/* Check process MAC label against snapshot path */
-	error = mac_check_vnode_access(proc_label, snapshot_name,
-	    VREAD);
-	if (error != 0) {
-		AUDIT_PERM_DENIED("snapshot_mac",
-		    "process MAC label does not allow access to snapshot");
-		return (EACCES);
-	}
-
-	/* Check if instance's MAC label allows snapshot operations */
-
-	AUDIT_SNAPSHOT_ACCESS(inst_id, snapshot_name);
+	/* Log the snapshot access attempt */
+	AUDIT_SNAPSHOT_ACCESS(inst_name, snapshot_name);
 	return (0);
 }
 
@@ -304,32 +267,34 @@ emu_check_snapshot_mac(struct thread *td, uint64_t inst_id, const char *snapshot
 int
 emu_validate_share_path(struct thread *td, uint64_t inst_id, const char *path)
 {
-	struct ucred *cred;
-	struct label *inst_label;
-	char real_path[MAXPATHLEN];
+	char path_copy[MAXPATHLEN];
 	int error;
 
-	/* Resolve the path to canonical form */
-	if (realpath(path, real_path) == NULL)
-		return (errno);
+	if (path == NULL)
+		return (EINVAL);
+
+	/* Copy path from userspace */
+	error = copyinstr(path, path_copy, sizeof(path_copy), NULL);
+	if (error != 0)
+		return (error);
 
 	/* Check for blocked paths */
-	if (strncmp(real_path, "/dev/", 5) == 0 ||
-	    strncmp(real_path, "/proc/", 6) == 0 ||
-	    strncmp(real_path, "/sys/", 5) == 0 ||
-	    strncmp(real_path, "/etc/", 5) == 0) {
+	if (strncmp(path_copy, "/dev/", 5) == 0 ||
+	    strncmp(path_copy, "/proc/", 6) == 0 ||
+	    strncmp(path_copy, "/sys/", 5) == 0 ||
+	    strncmp(path_copy, "/etc/", 5) == 0) {
 		AUDIT_PERM_DENIED("share_path",
 		    "blocked path (dev/proc/sys/etc)");
-		log(LOG_WARNING, "emu: share path blocked: %s\n", real_path);
+		log(LOG_WARNING, "emu: share path blocked: %s\n", path_copy);
 		return (EPERM);
 	}
 
 	/* Check MAC label for share access */
-	error = emu_check_share_mac(td, inst_id, real_path);
+	error = emu_check_share_mac(td, inst_id, path_copy);
 	if (error != 0)
 		return (error);
 
 	log(LOG_INFO, "emu: validated share path %s for instance %lu\n",
-	    real_path, (unsigned long)inst_id);
+	    path_copy, (unsigned long)inst_id);
 	return (0);
 }

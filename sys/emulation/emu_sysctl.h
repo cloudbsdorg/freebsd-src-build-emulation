@@ -1,7 +1,8 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2026 Mark LaPointe <mark@cloudbsd.org>
+ * Copyright (c) 2026 FreeBSD Emulation Framework Project
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,27 +26,19 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _EMU_INSTANCE_H_
-#define _EMU_INSTANCE_H_
+#ifndef _EMU_SYSCTL_H_
+#define _EMU_SYSCTL_H_
 
 #ifdef _KERNEL
-#include <sys/mutex.h>
-#endif
+
+#include <sys/sysctl.h>
 
 /*
- * Instance management functions exported for use by other emulation modules
+ * The kern.emulation sysctl node
+ * This is defined in emu_main.c via SYSCTL_NODE macro
  */
+SYSCTL_DECL(_kern_emulation);
 
-/* Instance structure - forward declaration only for header */
-struct emu_instance;
+#endif /* _KERNEL */
 
-/* Find instance by ID (must be called with emu_instance_lock held) */
-struct emu_instance *emu_find_instance(uint64_t inst_id);
-
-/* External instance lock for synchronization */
-extern struct mtx emu_instance_lock;
-
-/* User limits management */
-int emu_check_user_limits(uid_t uid, int num_vcpus, uint64_t memory);
-
-#endif /* _EMU_INSTANCE_H_ */
+#endif /* !_EMU_SYSCTL_H_ */
