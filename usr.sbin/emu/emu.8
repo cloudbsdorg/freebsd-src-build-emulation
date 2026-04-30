@@ -440,6 +440,148 @@ $ emu blob list
 $ emu blob download seabios
 $ emu blob verify seabios
 .Ed
+.Pp
+Verify emulation framework status:
+.Bd -literal -offset indent
+$ emu test -v
+.Ed
+.Pp
+Load the emulation kernel module:
+.Bd -literal -offset indent
+# kldload emu_core
+.Ed
+.Sh HOST CONFIGURATION
+This section describes how to configure the host system for secure emulation.
+.Ss Loading the Kernel Module
+Load the emulation kernel module at boot or manually:
+.Bd -literal -offset indent
+# Add to /boot/loader.conf:
+emu_core_load="YES"
+
+# Or load manually:
+# kldload emu_core
+.Ed
+.Pp
+Check kernel module status:
+.Bd -literal -offset indent
+$ kldstat | grep emu_core
+.Ed
+.Ss Setting Securelevel
+The securelevel controls the level of kernel hardening:
+.Bd -literal -offset indent
+# To enable securelevel, add to /etc/rc.conf:
+kern_securelevel_enable="YES"
+kern_securelevel="1"
+.Ed
+.Pp
+Available securelevels:
+.Bl -tag -width "3" -compact
+.It -1
+Permanently insecure (never raise)
+.It 0
+Insecure mode (default for development)
+.It 1
+Secure mode (default for production)
+.It 2
+Highly secure
+.It 3
+Network-secure (maximum security)
+.El
+.Ss Enabling MAC Framework
+To enable MAC enforcement:
+.Bd -literal -offset indent
+# Add to /boot/loader.conf:
+mac_veriexec_load="YES"
+
+# Enable MAC policy
+maclabel="root:secattr"
+
+# See mac_seeotheruids(4) and mac_veriexec(4)
+.Ed
+.Ss Enabling Veriexec
+To enable binary integrity verification:
+.Bd -literal -offset indent
+# Create /etc/veriexec manifest
+# Format: path hash algorithm flags
+/bin/sh sha256 abc123... flags
+
+# Verify using veriexecctl
+veriexecctl mode strict
+.Ed
+.Ss Configuring Resource Limits
+Enable rctl resource limits:
+.Bd -literal -offset indent
+# Add to /etc/rc.conf:
+rctl_enable="YES"
+
+# Create /etc/rctl.conf:
+user:emu:maxproc=100
+user:emu:memoryuse=4G
+.Ed
+.Ss Enabling Huge Pages
+Configure huge pages for instance memory:
+.Bd -literal -offset indent
+# Add to /boot/loader.conf:
+vm.pmap.pg_ps_enabled=1
+
+# Or via sysctl:
+sysctl vm.pmap.pg_ps_enabled=1
+.Ed
+.Ss Network Isolation
+Configure isolated network for secure emulation:
+.Bd -literal -offset indent
+# Add to /etc/rc.conf:
+cloned_interfaces="bridge0"
+ifconfig_bridge0="addm emu0 10.0.0.1/24 up"
+.Ed
+.Ss Security Configuration Levels
+The emulation framework supports multiple security levels:
+.Ss Basic (Development)
+For local development only:
+.Bd -literal -offset indent
+# /usr/local/etc/emu/emu.conf
+securelevel=-1
+mac_enforce=false
+veriexec_check=false
+audit_enabled=false
+.Ed
+.Ss Standard (Default)
+For general use:
+.Bd -literal -offset indent
+# /usr/local/etc/emu/emu.conf
+securelevel=1
+mac_enforce=true
+veriexec_check=true
+audit_enabled=true
+rctl_enabled=true
+.Ed
+.Ss High Security
+For sensitive workloads:
+.Bd -literal -offset indent
+# /usr/local/etc/emu/emu.conf
+securelevel=3
+mac_enforce=true
+veriexec_check=true
+audit_enabled=true
+audit_buffer_size=8192
+rctl_enabled=true
+network_isolation=true
+.Ed
+.Ss Maximum Security
+For critical infrastructure:
+.Bd -literal -offset indent
+# /usr/local/etc/emu/emu.conf
+securelevel=3
+mac_enforce=true
+veriexec_check=true
+audit_enabled=true
+audit_buffer_size=16384
+rctl_enabled=true
+network_isolation=true
+huge_pages=true
+memory_encryption=true
+swap_encryption=true
+.Ed
 .Sh SEE ALSO
 .Bl -tag -width Ds -compact
 .It Xr bhyve 4

@@ -174,6 +174,155 @@ Enable verbose output
 The default is
 .Va no .
 .El
+.Ss Security Settings
+.Bl -tag -width Fl -compact
+.It Va securelevel No = Ar level
+Kernel securelevel for emulation instances.
+.Ar level
+can be:
+.Bl -tag -width "-1" -compact
+.It -1
+Permanently insecure (never raise)
+.It 0
+Insecure (default for development)
+.It 1
+Secure (default for production)
+.It 2
+Highly secure
+.It 3
+Network-secure (maximum)
+.El
+.It Va mac_enforce No = Ar bool
+Enable MAC label enforcement.
+The default is
+.Va true .
+.It Va veriexec_check No = Ar bool
+Verify binary integrity via veriexec.
+The default is
+.Va auto
+(detect if available).
+.It Va audit_enabled No = Ar bool
+Enable security auditing for emulation events.
+The default is
+.Va true .
+.It Va audit_buffer_size No = Ar size
+Audit event buffer size (number of events).
+The default is
+.Va 1024 .
+.It Va memory_encryption No = Ar bool
+Enable memory encryption for instances.
+Requires CPU AES-NI.
+The default is
+.Va false .
+.It Va balloon_enabled No = Ar bool
+Enable memory balloon driver for instances.
+The default is
+.Va true .
+.It Va balloon_target_pages No = Ar count
+Target pages for memory balloon adjustment.
+The default is
+.Va 256
+(1MB on amd64).
+.It Va balloon_interval_secs No = Ar seconds
+Interval between balloon adjustments.
+The default is
+.Va 5 .
+.El
+.Ss Resource Limits
+.Bl -tag -width Fl -compact
+.It Va max_instances No = Ar count
+Maximum number of concurrent emulation instances.
+The default is
+.Va 32 .
+.It Va max_memory_mb No = Ar size
+Maximum total memory for all instances (MB).
+The default is
+.Va 65536
+(64GB).
+.It Va max_vcpus No = Ar count
+Maximum virtual CPUs per instance.
+The default is
+.Va 16 .
+.It Va memory_warn_percent No = Ar percent
+Warn when system memory usage exceeds this percentage.
+The default is
+.Va 85 .
+.It Va oom_protection No = Ar bool
+Enable OOM protection for emulator processes.
+The default is
+.Va true .
+.It Va rctl_enabled No = Ar bool
+Enable resource limits via rctl subsystem.
+The default is
+.Va auto .
+.El
+.Ss Network Security
+.Bl -tag -width Fl -compact
+.It Va network_isolation No = Ar bool
+Isolate emulation network from host network.
+The default is
+.Va false .
+.It Va network_nat No = Ar bool
+Use NAT for emulation network access.
+The default is
+.Va true .
+.It Va firewall_rules No = Ar path
+Path to custom firewall rules file.
+.Disabled by default.
+.It Va vmm_strict_priority No = Ar bool
+Give emulator processes strict priority.
+The default is
+.Va true .
+.El
+.Ss Snapshot and Share Security
+.Bl -tag -width Fl -compact
+.It Va snapshot_require_mac No = Ar bool
+Require matching MAC labels for snapshots.
+The default is
+.Va true .
+.It Va share_require_mac No = Ar bool
+Require matching MAC labels for file shares.
+The default is
+.Va true .
+.It Va share_path_validation No = Ar bool
+Validate shared paths are within allowed directories.
+The default is
+.Va true .
+.It Va snapshot_allowed_dirs No = Ar path
+Comma-separated list of allowed snapshot directories.
+Default is
+.Va /var/emu/snapshots .
+.El
+.Ss Kernel Module Options
+.Bl -tag -width Fl -compact
+.It Va module_debug No = Ar bool
+Enable kernel module debug logging.
+The default is
+.Va false .
+.It Va module_audit_level No = Ar level
+Kernel audit level (0=off, 1=errors, 2=warnings, 3=info, 4=debug).
+The default is
+.Va 1 .
+.It Va conflict_check No = Ar bool
+Check for conflicting virtualization modules.
+The default is
+.Va true .
+.It Va numa_aware No = Ar bool
+Enable NUMA-aware memory allocation.
+The default is
+.Va true .
+.It Va huge_pages No = Ar bool
+Attempt to use huge pages for instance memory.
+The default is
+.Va auto .
+.It Va swap_encryption No = Ar bool
+Encrypt swap pages for instance memory.
+The default is
+.Va false .
+.It Va cpu_affinity No = Ar list
+Comma-separated list of CPUs for emulator affinity.
+.Disabled by default.
+.El
 .Sh FILES
 .Bl -tag -width Ds -compact
 .It Pa /usr/local/etc/emu/emu.conf
@@ -186,9 +335,183 @@ Default instance data directory
 Default image cache directory
 .El
 .Sh EXAMPLES
+.Ss Basic Development Configuration (Insecure)
+This configuration is suitable for local development where security is not a concern.
+All security features are disabled for maximum performance and debugging capability.
 .Bd -literal -offset indent
-# emu.conf - FreeBSD Emulation Framework Configuration
+# emu.conf - Basic Development Configuration
+# WARNING: This configuration is INSECURE and should only be used
+# in isolated development environments.
 
+# Disable all security features
+securelevel=-1
+mac_enforce=false
+veriexec_check=false
+audit_enabled=false
+
+# Disable resource limits
+max_instances=128
+max_memory_mb=131072
+oom_protection=false
+rctl_enabled=false
+
+# Disable network security
+network_isolation=false
+network_nat=true
+vmm_strict_priority=false
+
+# Disable snapshot/share security
+snapshot_require_mac=false
+share_require_mac=false
+share_path_validation=false
+
+# Debug everything
+module_debug=true
+module_audit_level=4
+
+# Performance over security
+balloon_enabled=true
+memory_encryption=false
+swap_encryption=false
+.Ed
+.Pp
+.Ss Standard Configuration
+This configuration balances security and usability for general purpose emulation.
+.Bd -literal -offset indent
+# emu.conf - Standard Configuration
+# Balanced security for general use
+
+# Standard security settings
+securelevel=1
+mac_enforce=true
+veriexec_check=true
+audit_enabled=true
+audit_buffer_size=2048
+
+# Resource limits
+max_instances=32
+max_memory_mb=65536
+max_vcpus=16
+memory_warn_percent=85
+oom_protection=true
+rctl_enabled=true
+
+# Network security
+network_isolation=false
+network_nat=true
+vmm_strict_priority=true
+
+# Snapshot/share security
+snapshot_require_mac=true
+share_require_mac=true
+share_path_validation=true
+
+# Debug disabled
+module_debug=false
+module_audit_level=1
+
+# Memory management
+balloon_enabled=true
+memory_encryption=false
+swap_encryption=false
+numa_aware=true
+huge_pages=auto
+.Ed
+.Pp
+.Ss High Security Configuration
+This configuration provides enhanced security for sensitive workloads.
+.Bd -literal -offset indent
+# emu.conf - High Security Configuration
+# Enhanced security for sensitive workloads
+
+# Maximum security
+securelevel=3
+mac_enforce=true
+veriexec_check=true
+audit_enabled=true
+audit_buffer_size=8192
+
+# Strict resource limits
+max_instances=16
+max_memory_mb=32768
+max_vcpus=8
+memory_warn_percent=75
+oom_protection=true
+rctl_enabled=true
+
+# Network isolation
+network_isolation=true
+network_nat=true
+vmm_strict_priority=true
+
+# Strict snapshot/share security
+snapshot_require_mac=true
+share_require_mac=true
+share_path_validation=true
+snapshot_allowed_dirs=/var/emu/snapshots,/secure/emu/snapshots
+
+# Kernel hardening
+module_debug=false
+module_audit_level=2
+conflict_check=true
+numa_aware=true
+huge_pages=true
+swap_encryption=true
+
+# Memory encryption if available
+memory_encryption=true
+.Ed
+.Pp
+.Ss Maximum Security Configuration
+This configuration provides the highest level of security for critical infrastructure.
+.Bd -literal -offset indent
+# emu.conf - Maximum Security Configuration
+# WARNING: Requires significant system configuration
+
+# Lock down security
+securelevel=3
+mac_enforce=true
+veriexec_check=true
+audit_enabled=true
+audit_buffer_size=16384
+
+# Minimal resource limits
+max_instances=8
+max_memory_mb=16384
+max_vcpus=4
+memory_warn_percent=60
+oom_protection=true
+rctl_enabled=true
+
+# Complete network isolation
+network_isolation=true
+network_nat=true
+vmm_strict_priority=true
+firewall_rules=/etc/emu/firewall.rules
+
+# Maximum snapshot/share restrictions
+snapshot_require_mac=true
+share_require_mac=true
+share_path_validation=true
+snapshot_allowed_dirs=/secure/emu/snapshots
+
+# Kernel hardening
+module_debug=false
+module_audit_level=3
+conflict_check=true
+numa_aware=true
+huge_pages=true
+swap_encryption=true
+cpu_affinity=0,1,2,3
+
+# Memory encryption
+memory_encryption=true
+balloon_enabled=false
+.Ed
+.Pp
+.Ss Instance Directories
+Configure instance and cache directories:
+.Bd -literal -offset indent
 # Instance directories
 instance_dir=/var/emu
 image_cache_dir=/var/cache/emu/images
@@ -214,6 +537,54 @@ To use arm64 as the default architecture:
 default_arch=arm64
 default_memory=1G
 default_cpus=4
+.Ed
+.Sh HOST CONFIGURATION
+This section describes how to configure the host system for each security level.
+.Ss Enabling MAC Veriexec
+To enable veriexec binary verification:
+.Bd -literal -offset indent
+# Add to /boot/loader.conf
+mac_veriexec_load="YES"
+
+# Create veriexec manifest in /etc/veriexec
+# See veriexecctl(8) for manifest format
+.Ed
+.Ss Enabling Securelevel
+To set the kernel securelevel:
+.Bd -literal -offset indent
+# Add to /etc/rc.conf
+kern_securelevel_enable="YES"
+kern_securelevel="1"
+.Ed
+.Ss Enabling rctl Resource Limits
+To enable rctl resource control:
+.Bd -literal -offset indent
+# Add to /etc/rc.conf
+jail_enable="YES"
+rctl_enable="YES"
+
+# Add resource limits in /etc/rctl.conf
+# user:emu:maxproc=100
+# user:emu:memoryuse=4G
+.Ed
+.Ss Enabling Huge Pages
+To enable huge pages for instance memory:
+.Bd -literal -offset indent
+# Add to /etc/sysctl.conf
+vm.pmap.pg_ps_enabled=1
+
+# Configure huge pages (requires reboot)
+# Add to /boot/loader.conf
+vm.hmem_size=8G
+vm.pmap.pg_ps__enabled=1
+.Ed
+.Ss Configuring Network Isolation
+To configure isolated network for emulation:
+.Bd -literal -offset indent
+# Create isolated bridge
+# Add to /etc/rc.conf
+cloned_interfaces="bridge0"
+ifconfig_bridge0="addm emu0 up"
 .Ed
 .Sh SEE ALSO
 .Xr emu 8

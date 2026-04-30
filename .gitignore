@@ -69,3 +69,5 @@ usr.sbin/emu/emu.full
 usr.sbin/bhyve/bhyve
 usr.sbin/bhyve/bhyve.debug
 usr.sbin/bhyve/bhyve.full
+.output.txt
+lib/libveriexec/veriexec.3.gz
