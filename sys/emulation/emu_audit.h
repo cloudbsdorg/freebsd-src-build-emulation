@@ -332,6 +332,12 @@ int	emu_audit_log_data(emu_audit_event_t event, emu_audit_severity_t severity,
 #define	AUDIT_SHARE_PATH_INVALID(inst, path) \
 	emu_audit_log(EMU_AUDIT_EVENT_SHARE_PATH_INVALID, EMU_AUDIT_SEVERITY_WARNING, \
 	    inst, "Invalid share path: %s", path)
+#define	AUDIT_SHARE_ACCESS(inst, path) \
+	emu_audit_log(EMU_AUDIT_EVENT_SHARE_CREATE, EMU_AUDIT_SEVERITY_INFO, \
+	    inst, "Share access granted: %s", path)
+#define	AUDIT_SNAPSHOT_ACCESS(inst, name) \
+	emu_audit_log(EMU_AUDIT_EVENT_SNAPSHOT_CREATE, EMU_AUDIT_SEVERITY_INFO, \
+	    inst, "Snapshot access granted: %s", name)
 
 /* Configuration accessors */
 int	emu_audit_is_enabled(void);

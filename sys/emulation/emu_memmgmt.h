@@ -50,6 +50,10 @@ int	emu_memmgmt_get_policy(void);
 int	emu_memmgmt_get_balloon_min_pct(void);
 int	emu_memmgmt_get_balloon_interval(void);
 
+/* Balloon sysctl interface */
+void	emu_balloon_sysctl_create(uint64_t inst_id, const char *inst_name,
+    uint64_t *balloon_target);
+
 #endif /* _KERNEL */
 
 #endif /* !_SYS_EMU_MEMMGMT_H_ */

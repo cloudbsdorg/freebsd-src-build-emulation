@@ -77,6 +77,7 @@ struct emu_instance {
 	uint64_t		inst_memory_used;	/* Current memory usage */
 	uint64_t		inst_cpu_time_limit;	/* Max CPU time in seconds */
 	uint64_t		inst_cpu_time_used;	/* Current CPU time used */
+	uint64_t		inst_balloon_target;	/* Balloon target size in bytes */
 	struct timeval		inst_start_time;	/* When instance was started */
 	struct timeval		inst_last_activity;	/* Last activity timestamp */
 	int			inst_num_vcpus;	/* Number of vCPUs */
@@ -457,6 +458,10 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 	for (int i = 0; i < num_vcpus; i++) {
 		emu_vcpu_sysctl_create(inst->inst_id, inst->inst_name, &inst->inst_vcpus[i]);
 	}
+
+	/* Create balloon sysctl interface (S7.8) */
+	emu_balloon_sysctl_create(inst->inst_id, inst->inst_name,
+	    &inst->inst_balloon_target);
 
 	/* Update user limits (SMP-aware) */
 	emu_user_create_instance(uid, inst->inst_num_vcpus,

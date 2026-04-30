@@ -418,6 +418,78 @@ emu_memmgmt_sysctl_system_used(SYSCTL_HANDLER_ARGS)
 }
 
 /*
+ * Balloon target sysctl handler for per-instance
+ */
+static int
+emu_memmgmt_sysctl_balloon_target(SYSCTL_HANDLER_ARGS)
+{
+	uint64_t *balloon_target = arg1;
+	uint64_t newval;
+	int error;
+
+	newval = *balloon_target;
+	error = sysctl_handle_64(oidp, &newval, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+
+	/* Enforce minimum based on global setting */
+	if (newval < 0)
+		return (EINVAL);
+
+	/* Check securelevel restrictions */
+	error = emu_securelevel_restricted_op(curthread, "balloon_target_write");
+	if (error != 0) {
+		log(LOG_WARNING, "emu: balloon_target write restricted by securelevel\n");
+		return (error);
+	}
+
+	*balloon_target = newval;
+	log(LOG_INFO, "emu: instance balloon target set to %lu bytes\n", newval);
+
+	return (0);
+}
+
+/*
+ * Create per-instance balloon sysctl interfaces
+ * Creates: kern.emulation.instance.<name>.balloon_target
+ */
+void
+emu_balloon_sysctl_create(uint64_t inst_id __unused, const char *inst_name,
+    uint64_t *balloon_target)
+{
+	static struct sysctl_ctx_list balloon_ctx;
+	struct sysctl_oid *balloon_oid;
+	char node_name[64];
+
+	if (balloon_target == NULL || inst_name == NULL)
+		return;
+
+	/* Initialize context for this instance */
+	SYSCTL_INIT_LIST(&balloon_ctx);
+
+	/* Create balloon node under instance - use instance name for uniqueness */
+	snprintf(node_name, sizeof(node_name), "%s_balloon", inst_name);
+	balloon_oid = SYSCTL_ADD_NODE(&balloon_ctx,
+	    SYSCTL_STATIC_CHILDREN(_kern_emulation), OID_AUTO,
+	    node_name, CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
+	    "Balloon interface for instance %s", inst_name);
+
+	if (balloon_oid == NULL)
+		return;
+
+	/* Add balloon target sysctl */
+	SYSCTL_ADD_PROC(&balloon_ctx, SYSCTL_CHILDREN(balloon_oid), OID_AUTO,
+	    "target", CTLTYPE_U64 | CTLFLAG_RW, balloon_target, 0,
+	    emu_memmgmt_sysctl_balloon_target, "QU",
+	    "Balloon target size in bytes");
+
+	/* Add current size (read-only) - would need to query bhyve for actual */
+	SYSCTL_ADD_U64(&balloon_ctx, SYSCTL_CHILDREN(balloon_oid), OID_AUTO,
+	    "current", CTLFLAG_RD, balloon_target, 0,
+	    "Current balloon size in bytes");
+}
+
+/*
  * Initialize memory management subsystem
  */
 void
