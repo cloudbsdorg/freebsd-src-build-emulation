@@ -104,6 +104,8 @@ int	emu_instance_create(const char *name, uid_t uid, gid_t gid,
 int	emu_instance_destroy(uint64_t inst_id);
 int	emu_instance_start(uint64_t inst_id);
 int	emu_instance_stop(uint64_t inst_id);
+int	emu_instance_attach_pid(uint64_t inst_id, pid_t pid);
+int	emu_instance_detach_pid(uint64_t inst_id);
 int	emu_instance_get_state(uint64_t inst_id);
 void	emu_instance_update_memory(uint64_t inst_id, uint64_t memory_used);
 void	emu_instance_update_cpu_time(uint64_t inst_id, uint64_t cpu_time);

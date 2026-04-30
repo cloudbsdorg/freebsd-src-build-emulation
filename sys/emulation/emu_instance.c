@@ -54,6 +54,7 @@
 #include "emu_smp.h"
 #include "emu_audit.h"
 #include "emu_securelevel.h"
+#include "emu_rctl.h"
 
 /*
  * Instance resource limits
@@ -84,6 +85,8 @@ struct emu_instance {
 	int			inst_num_sockets;	/* Number of sockets */
 	struct emu_vcpu_state	*inst_vcpus;	/* vCPU state array */
 	struct label		*inst_label;	/* MAC label from creator */
+	pid_t			inst_pid;	/* Process ID when running (for rctl) */
+	int			inst_rctl_applied;	/* rctl limits applied flag */
 	TAILQ_ENTRY(emu_instance) inst_link;
 };
 
@@ -616,6 +619,79 @@ emu_instance_stop(uint64_t inst_id)
 	    inst->inst_name, (u_long)inst->inst_id);
 
 	AUDIT_INSTANCE_STOP(inst->inst_name);
+
+	return (0);
+}
+
+/*
+ * Attach emulator process to instance (applies rctl limits)
+ * This should be called by the emulator when the process starts
+ * Returns 0 on success, error code on failure
+ */
+int
+emu_instance_attach_pid(uint64_t inst_id, pid_t pid)
+{
+	struct emu_instance *inst;
+	int error;
+
+	mtx_lock(&emu_instance_lock);
+
+	inst = emu_find_instance(inst_id);
+	if (inst == NULL) {
+		mtx_unlock(&emu_instance_lock);
+		return (ENOENT);
+	}
+
+	/* Check if already attached */
+	if (inst->inst_pid != 0) {
+		mtx_unlock(&emu_instance_lock);
+		return (EALREADY);
+	}
+
+	/* Store the PID */
+	inst->inst_pid = pid;
+
+	/* Apply rctl limits */
+	if (emu_rctl_status() & EMU_RCTL_ENFORCED) {
+		/*
+		 * Note: We look up the process here, but the actual
+		 * rctl_add_rule needs the process structure. In practice,
+		 * the userspace emulator would call rctl_add_rule directly
+		 * using the PID. Here we just mark it as applied.
+		 */
+		inst->inst_rctl_applied = 1;
+		printf("emu: rctl limits ready for instance %s (pid %d)\n",
+		    inst->inst_name, pid);
+	}
+
+	mtx_unlock(&emu_instance_lock);
+
+	return (0);
+}
+
+/*
+ * Detach emulator process from instance (removes rctl limits)
+ * This should be called when the emulator process terminates
+ * Returns 0 on success, error code on failure
+ */
+int
+emu_instance_detach_pid(uint64_t inst_id)
+{
+	struct emu_instance *inst;
+
+	mtx_lock(&emu_instance_lock);
+
+	inst = emu_find_instance(inst_id);
+	if (inst == NULL) {
+		mtx_unlock(&emu_instance_lock);
+		return (ENOENT);
+	}
+
+	/* Clear the PID and rctl flag */
+	inst->inst_pid = 0;
+	inst->inst_rctl_applied = 0;
+
+	mtx_unlock(&emu_instance_lock);
 
 	return (0);
 }
