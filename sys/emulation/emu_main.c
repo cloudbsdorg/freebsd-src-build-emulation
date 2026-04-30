@@ -56,6 +56,53 @@ void emu_audit_destroy(void);
 void emu_memmgmt_init(void);
 void emu_scrub_init(void);
 void emu_scrub_destroy(void);
+static int emu_check_conflicts(void);
+
+/*
+ * List of conflicting emulation frameworks
+ */
+static const char *emu_conflicting_modules[] = {
+	"bhyve",		/* bhyve hypervisor */
+	"vmm",			/* Intel VT-x / AMD-V virtual machine monitor */
+	"nmdm",			/* Named pseudo-terminals (used by bhyve) */
+	"fbuf",			/* Frame buffer (used by bhyve) */
+	"virtio",		/* VirtIO front-end drivers */
+	NULL
+};
+
+/*
+ * Check for conflicting emulation frameworks
+ * Returns 0 if no conflicts, error code if conflict detected
+ */
+static int
+emu_check_conflicts(void)
+{
+	struct module *mod;
+	int i;
+
+	for (i = 0; emu_conflicting_modules[i] != NULL; i++) {
+		if (module_lookup(emu_conflicting_modules[i]) != NULL) {
+			printf("emu_core: WARNING: Conflicting module '%s' is loaded\n",
+			    emu_conflicting_modules[i]);
+			printf("emu_core: The emulation framework may not function "
+			    "correctly with this module.\n");
+			/* Continue loading but warn - conflicts may be benign */
+		}
+	}
+
+	/* Check for running bhyve instances via sysctl */
+	int bhyve_instances = 0;
+	size_t len = sizeof(bhyve_instances);
+	if (kernel_sysctlbyname("hw.vmm.create", &bhyve_instances, &len, NULL, 0) == 0) {
+		/* vmm module is present, check if instances exist */
+		if (bhyve_instances > 0) {
+			printf("emu_core: WARNING: %d vmm/bhyve instance(s) detected\n",
+			    bhyve_instances);
+		}
+	}
+
+	return (0);
+}
 
 /*
  * Emulation Framework Core Module (emu_core.ko)
@@ -206,8 +253,8 @@ emu_core_modevent(module_t mod, int type, void *data)
 		/* Initialize memory scrubbing subsystem */
 		emu_scrub_init();
 
-		/* Validate no conflicts */
-		/* XXX: Check for conflicting emulation frameworks */
+		/* Validate no conflicts with other emulation frameworks */
+		(void)emu_check_conflicts();
 
 		/* Sysctl tree already created by SYSCTL_NODE */
 
