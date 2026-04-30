@@ -29,7 +29,8 @@ CFLAGS+= ${XCFLAGS.${.TARGET:T:R}:U}
 BRSSL_CFLAGS+= -I${BEARSSL}/tools
 BRSSL_SRCS+= \
 	${BEARSSL}/tools/xmem.c \
-	${BEARSSL}/tools/vector.c
+	${BEARSSL}/tools/vector.c \
+	${BEARSSL}/tools/errors.c
 
 BRSSL_DEPS= \
 	brf.c \

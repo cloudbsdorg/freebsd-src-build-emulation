@@ -71,3 +71,24 @@ usr.sbin/bhyve/bhyve.debug
 usr.sbin/bhyve/bhyve.full
 .output.txt
 lib/libveriexec/veriexec.3.gz
+# Generated files for libsecureboot
+lib/libsecureboot/ta.h
+lib/libsecureboot/vse.h
+lib/libsecureboot/*.pem
+# Generated files for sbin/veriexec
+sbin/veriexec/manifest_lexer.c
+sbin/veriexec/manifest_parser.c
+sbin/veriexec/manifest_parser.h
+sbin/veriexec/veriexec
+sbin/veriexec/veriexec.debug
+sbin/veriexec/veriexec.full
+sbin/veriexec/veriexec.8.gz
+# Kernel module
+sys/modules/emu_core/*.ko
+sys/modules/emu_core/*.ko.debug
+sys/modules/emu_core/*.ko.full
+# Man pages
+usr.sbin/emu/*.8.gz
+usr.sbin/emu/*.conf.5.gz
+usr.sbin/bhyve/*.8.gz
+usr.sbin/bhyve/*.5.gz
