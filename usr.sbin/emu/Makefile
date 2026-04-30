@@ -22,11 +22,12 @@ SRCS+=	emu_dev_uart.c
 SRCS+=	emu_dev_storage.c
 SRCS+=	emu_dev_net.c
 SRCS+=	emu_dev_rng.c
-SRCS+=	emu_gdb.c
+SRCS+=	emu_veriexec.c
 MAN=	emu.8
 
 WARNS?=	6
 
 CFLAGS+= -I${.CURDIR}
+LDADD+=	-lveriexec
 
 .include <bsd.prog.mk>

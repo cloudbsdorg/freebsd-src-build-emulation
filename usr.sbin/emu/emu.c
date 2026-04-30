@@ -265,6 +265,26 @@ main(int argc, char *argv[])
 		{ NULL, 0, NULL, 0 }
 	};
 
+	/*
+	 * Perform MAC veriexec binary fingerprint verification.
+	 * This checks if the emulator binary has been tampered with
+	 * when mac_veriexec is loaded and configured.
+	 * Returns 0 on success, -1 on verification failure.
+	 */
+	if (emu_veriexec_init() != 0) {
+		/*
+		 * Verification failed - either veriexec is in enforce mode
+		 * and our binary is not authorized, or there was an error.
+		 * In enforce mode, this should be fatal.
+		 */
+		if (emu_veriexec_is_enforcing()) {
+			errx(EX_SOFTWARE, "MAC veriexec verification failed: "
+			    "emulator binary is not authorized or has been "
+			    "tampered with");
+		}
+		/* Non-enforcing mode or other error - warn but continue */
+	}
+
 	/* Parse global options */
 	while ((ch = getopt_long(argc, argv, "vqo:g:h", long_options,
 	    &option_index)) != -1) {

@@ -189,6 +189,10 @@ int	emu_image_list(void);
 int	emu_image_remove(const char *arch, const char *image_name);
 int	emu_image_cleanup(int max_age_days);
 
+/* MAC veriexec integration for binary fingerprint verification */
+int	emu_veriexec_init(void);
+int	emu_veriexec_is_enforcing(void);
+
 /* Utility functions */
 extern int		g_verbose;
 extern int		g_quiet;
