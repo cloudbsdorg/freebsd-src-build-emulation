@@ -23,6 +23,7 @@ SRCS+=	emu_dev_storage.c
 SRCS+=	emu_dev_net.c
 SRCS+=	emu_dev_rng.c
 SRCS+=	emu_veriexec.c
+SRCS+=	emu_module.c
 MAN=	emu.8 emu.conf.5
 
 WARNS?=	6
