@@ -35,8 +35,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <libsecureboot/libsecureboot.h>
-#include <libsecureboot/openpgp/packet.h>
+#include <libsecureboot.h>
+#include <packet.h>
 
 #include "emu.h"
 
@@ -162,6 +162,7 @@ emu_cmd_blob(int argc, char *argv[])
 		int fd;
 		void *mmap_ptr;
 		size_t file_size;
+		size_t len;
 		SHA256_CTX ctx;
 
 		/* Get blob path from sysctl */
@@ -250,6 +251,7 @@ emu_cmd_blob(int argc, char *argv[])
 		void *sig_ptr;
 		size_t file_size;
 		size_t sig_size;
+		size_t len;
 		int rc;
 
 		/* Get blob path from sysctl */
@@ -351,6 +353,7 @@ emu_cmd_blob(int argc, char *argv[])
 		char blob_version[64];
 		char vulnerable_versions[256];
 		int is_vulnerable = 0;
+		size_t len;
 
 		/* Get blob version from sysctl */
 		snprintf(sysctl_name, sizeof(sysctl_name),
@@ -405,7 +408,7 @@ emu_cmd_blob(int argc, char *argv[])
 			fprintf(stderr, "WARNING: Firmware blob '%s' version %s is vulnerable!\n", 
 			    blob_name, blob_version);
 			fprintf(stderr, "Please update to a newer version.\n");
-			return (EVETOKENEXP); /* Using EVETOKENEXP as "version expired/vulnerable" */
+			return (EFTYPE); /* Using EFTYPE as "firmware type issue" */
 		}
 
 		if (!g_quiet)

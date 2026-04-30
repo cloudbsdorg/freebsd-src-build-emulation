@@ -236,6 +236,16 @@ void		emu_output_error(const char *fmt, ...);
 void		emu_output_error_v(const char *fmt, va_list ap);
 void		emu_output_info(const char *fmt, ...);
 void		emu_output_verbose(const char *fmt, ...);
+
+/* Symbol resolution */
+int		emu_sym_init(void);
+void		emu_sym_destroy(void);
+int		emu_sym_resolve(uint64_t addr, char *sym_name, size_t sym_name_len,
+		    uint64_t *sym_offset, const char *module);
+const char	*emu_sym_get_module(uint64_t addr);
+int		emu_sym_load_all_modules(void);
+int		emu_sym_count(void);
+
 __END_DECLS
 
 #endif /* !_EMU_H_ */

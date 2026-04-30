@@ -768,7 +768,7 @@ emu_decode_powerpc(struct emu_guest_mem *mem, uint64_t rip,
 	/* Initialize instruction structure */
 	memset(insn, 0, sizeof(*insn));
 	insn->rip = rip;
-	insn->arch = EMU_ARCH_POWERPC;
+ cpu->arch = EMU_ARCH_POWERPC;
 
 	/*
 	 * PowerPC instructions are always 32-bit (4 bytes) and big-endian.

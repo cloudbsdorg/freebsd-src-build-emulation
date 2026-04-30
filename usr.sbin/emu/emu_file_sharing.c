@@ -41,6 +41,7 @@
 
 #include "emu.h"
 #include "emu_engine.h"
+#include "emu_file_sharing.h"
 
 /*
  * Filesystem Sharing Implementation for Custom Emulator
@@ -113,7 +114,6 @@ emu_validate_share_path(const char *host_path, char *resolved_path,
 {
 	char *real_path;
 	char path_copy[MAXPATHLEN];
-	char *parent_dir;
 
 	if (host_path == NULL || resolved_path == NULL || resolved_len == 0) {
 		errno = EINVAL;
@@ -658,3 +658,5 @@ emu_file_sharing_list(struct emu_file_sharing *ctx)
 		}
 	}
 }
+
+__END_DECLS

@@ -28,12 +28,16 @@
 #define	_EMU_ENGINE_H_
 
 #include <sys/types.h>
-#include <sys/capsicum.h>
-#include <sys/capability.h>
 #include <sys/time.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+
+/* Capsicum compatibility - always use stub headers in build environment */
+#include "sys_capsicum_compat.h"
+
+/* Need emu_mem.h for enum emu_endian definition */
+#include "emu_mem.h"
 
 /*
  * Emulation Engine - Bounds-Checked Memory Access
@@ -239,7 +243,7 @@ int emu_limit_fd_rights(int fd, cap_rights_t *rights);
 int emu_limit_fd_ioctls(int fd, const u_long *cmds, size_t ncmds);
 
 /* Check if FD is essential (kept open during sandboxing) */
-bool emu_is_essential_fd(int fd);
+static inline bool emu_is_essential_fd(int fd);
 
 /*
  * Execution control - Instruction count limits and watchdog timer

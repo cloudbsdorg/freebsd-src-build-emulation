@@ -1060,7 +1060,6 @@ emu_close_nonessential_fds(void)
 int
 emu_enter_sandbox(void)
 {
-	cap_rights_t rights;
 	int error;
 
 	/* Close non-essential file descriptors first */

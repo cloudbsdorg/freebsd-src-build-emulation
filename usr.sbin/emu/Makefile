@@ -25,11 +25,17 @@ SRCS+=	emu_dev_rng.c
 SRCS+=	emu_virtqueue.c
 SRCS+=	emu_veriexec.c
 SRCS+=	emu_module.c
+SRCS+=	emu_sym.c
 MAN=	emu.8 emu.conf.5
 
 WARNS?=	3
 
 CFLAGS+= -I${.CURDIR}
+CFLAGS+= -I${SRCTOP}/lib/libsecureboot/h
+CFLAGS+= -I${SRCTOP}/lib/libsecureboot/openpgp
+CFLAGS+= -I${SRCTOP}/contrib/bearssl/inc
+CFLAGS+= -DUSE_BEARSSL
+CFLAGS+= -DCROSS_COMPILING
 # LDADD+=	-lveriexec  # libveriexec not available in build environment
 
 .include <bsd.prog.mk>

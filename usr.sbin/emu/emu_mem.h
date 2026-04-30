@@ -188,7 +188,7 @@ emu_mem_write_be64(void *dst, uint64_t val)
  */
 
 static inline uint16_t
-emu_mem_read16(const void *src, enum emu_endian endian)
+emu_endian_read16(const void *src, enum emu_endian endian)
 {
 	if (endian == EMU_ENDIAN_BIG)
 		return (emu_mem_read_be16(src));
@@ -197,7 +197,7 @@ emu_mem_read16(const void *src, enum emu_endian endian)
 }
 
 static inline uint32_t
-emu_mem_read32(const void *src, enum emu_endian endian)
+emu_endian_read32(const void *src, enum emu_endian endian)
 {
 	if (endian == EMU_ENDIAN_BIG)
 		return (emu_mem_read_be32(src));
@@ -206,7 +206,7 @@ emu_mem_read32(const void *src, enum emu_endian endian)
 }
 
 static inline uint64_t
-emu_mem_read64(const void *src, enum emu_endian endian)
+emu_endian_read64(const void *src, enum emu_endian endian)
 {
 	if (endian == EMU_ENDIAN_BIG)
 		return (emu_mem_read_be64(src));
@@ -215,7 +215,7 @@ emu_mem_read64(const void *src, enum emu_endian endian)
 }
 
 static inline void
-emu_mem_write16(void *dst, uint16_t val, enum emu_endian endian)
+emu_endian_write16(void *dst, uint16_t val, enum emu_endian endian)
 {
 	if (endian == EMU_ENDIAN_BIG)
 		emu_mem_write_be16(dst, val);
@@ -224,7 +224,7 @@ emu_mem_write16(void *dst, uint16_t val, enum emu_endian endian)
 }
 
 static inline void
-emu_mem_write32(void *dst, uint32_t val, enum emu_endian endian)
+emu_endian_write32(void *dst, uint32_t val, enum emu_endian endian)
 {
 	if (endian == EMU_ENDIAN_BIG)
 		emu_mem_write_be32(dst, val);
@@ -233,7 +233,7 @@ emu_mem_write32(void *dst, uint32_t val, enum emu_endian endian)
 }
 
 static inline void
-emu_mem_write64(void *dst, uint64_t val, enum emu_endian endian)
+emu_endian_write64(void *dst, uint64_t val, enum emu_endian endian)
 {
 	if (endian == EMU_ENDIAN_BIG)
 		emu_mem_write_be64(dst, val);

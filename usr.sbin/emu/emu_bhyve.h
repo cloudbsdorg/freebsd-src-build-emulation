@@ -28,8 +28,7 @@
 #define	_EMU_BHYVE_H_
 
 #include <sys/types.h>
-#include <sys/capsicum.h>
-#include <sys/capability.h>
+#include "sys_capsicum_compat.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include "emu_share.h"

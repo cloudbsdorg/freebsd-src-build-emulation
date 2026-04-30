@@ -26,10 +26,9 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/capsicum.h>
-#include <sys/capability.h>
 #include <sys/resource.h>
-#include <sys/procctl.h>
+#include "sys_capsicum_compat.h"
+#include "sys_procctl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
