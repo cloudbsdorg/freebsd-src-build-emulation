@@ -13,7 +13,7 @@ CFLAGS+= -I${SRCTOP}/contrib/bearssl/inc
 # Link against local libraries using full paths
 LDADD+= -L${OBJTOP}/lib/libveriexec -lveriexec
 LDADD+= -L${OBJTOP}/lib/libsecureboot -lsecureboot
-LDADD+= -L${OBJTOP}/contrib/bearssl/build -lbearssl
+LDADD+= -L${SRCTOP}/contrib/bearssl/build -lbearssl
 
 NO_SHARED=
 

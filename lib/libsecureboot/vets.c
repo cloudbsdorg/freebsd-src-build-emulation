@@ -35,7 +35,7 @@
 #define NEED_BRSSL_H
 #include "libsecureboot-priv.h"
 #include <brssl.h>
-#include <ta.h>
+#include "ta.h"
 
 #ifndef TRUST_ANCHOR_STR
 # define TRUST_ANCHOR_STR ta_PEM

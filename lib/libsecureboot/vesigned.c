@@ -25,7 +25,7 @@
 #include <sys/cdefs.h>
 #include <libsecureboot.h>
 
-#include <vse.h>
+#include "vse.h"
 
 /**
  * @brief
