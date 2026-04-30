@@ -31,6 +31,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sha256.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 
 #include "emu.h"
 
@@ -44,7 +48,7 @@ extern int g_quiet;
  * Commands:
  *   list                     - List available blobs
  *   download <blob_name>     - Download a specific blob
- *   verify <blob_name>       - Verify blob integrity
+ *   verify <blob_name>       - Verify blob integrity (SHA-256)
  *   delete <blob_name>       - Delete a blob
  *   info <blob_name>         - Show blob information
  */
@@ -148,29 +152,88 @@ emu_cmd_blob(int argc, char *argv[])
 		if (g_verbose)
 			printf("Verifying firmware blob '%s'\n", blob_name);
 
-		snprintf(sysctl_name, sizeof(sysctl_name),
-		    "kern.emulation.blob.verify");
-		snprintf(sysctl_value, sizeof(sysctl_value), "%s", blob_name);
+		/* S19.1: Implement firmware SHA-256 verification */
+		char blob_path[PATH_MAX];
+		char expected_hash[65]; /* 64 hex chars + null */
+		unsigned char hash[SHA256_DIGEST_LENGTH];
+		struct stat sb;
+		int fd;
+		void *mmap_ptr;
+		size_t file_size;
+		SHA256_CTX ctx;
 
-		error = sysctlbyname(sysctl_name, NULL, NULL, sysctl_value,
-		    strlen(sysctl_value));
+		/* Get blob path from sysctl */
+		snprintf(sysctl_name, sizeof(sysctl_name),
+		    "kern.emulation.blob.%s.path", blob_name);
+		error = sysctlbyname(sysctl_name, blob_path, &len, NULL, 0);
 		if (error != 0) {
 			if (errno == ENOENT) {
 				fprintf(stderr, "Blob '%s' not found\n", blob_name);
-			} else if (errno == EDOM) {
-				fprintf(stderr, "Blob '%s' verification failed - checksum mismatch\n",
-				    blob_name);
-			} else if (errno == EAUTH) {
-				fprintf(stderr, "Blob '%s' verification failed - signature invalid\n",
-				    blob_name);
 			} else {
-				fprintf(stderr, "Failed to verify blob: %s\n", strerror(errno));
+				fprintf(stderr, "Failed to get blob path: %s\n", strerror(errno));
 			}
 			return (errno);
 		}
 
+		/* Get expected hash from sysctl */
+		snprintf(sysctl_name, sizeof(sysctl_name),
+		    "kern.emulation.blob.%s.sha256", blob_name);
+		len = sizeof(expected_hash);
+		error = sysctlbyname(sysctl_name, expected_hash, &len, NULL, 0);
+		if (error != 0) {
+			fprintf(stderr, "Expected hash not available for blob '%s'\n", blob_name);
+			return (errno);
+		}
+
+		/* Open and map blob file */
+		fd = open(blob_path, O_RDONLY);
+		if (fd < 0) {
+			fprintf(stderr, "Failed to open blob file: %s\n", strerror(errno));
+			return (errno);
+		}
+
+		if (fstat(fd, &sb) < 0) {
+			fprintf(stderr, "Failed to stat blob file: %s\n", strerror(errno));
+			close(fd);
+			return (errno);
+		}
+
+		file_size = sb.st_size;
+		mmap_ptr = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+		if (mmap_ptr == MAP_FAILED) {
+			fprintf(stderr, "Failed to mmap blob file: %s\n", strerror(errno));
+			close(fd);
+			return (errno);
+		}
+
+		/* Compute SHA-256 hash */
+		SHA256_Init(&ctx);
+		SHA256_Update(&ctx, mmap_ptr, file_size);
+		SHA256_Final(hash, &ctx);
+
+		/* Convert to hex string */
+		char computed_hash[65];
+		for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+			sprintf(&computed_hash[i * 2], "%02x", hash[i]);
+		}
+		computed_hash[64] = '\0';
+
+		munmap(mmap_ptr, file_size);
+		close(fd);
+
+		/* Compare hashes */
+		if (strcmp(computed_hash, expected_hash) != 0) {
+			fprintf(stderr, "SHA-256 verification failed for blob '%s'\n", blob_name);
+			fprintf(stderr, "Expected: %s\n", expected_hash);
+			fprintf(stderr, "Computed: %s\n", computed_hash);
+			return (EDOM);
+		}
+
 		if (!g_quiet)
-			printf("Firmware blob '%s' verified successfully\n", blob_name);
+			printf("Firmware blob '%s' verified successfully (SHA-256: %s)\n", 
+			    blob_name, computed_hash);
+
+		return (0);
 
 	} else if (strcmp(command, "delete") == 0) {
 		if (g_verbose)
