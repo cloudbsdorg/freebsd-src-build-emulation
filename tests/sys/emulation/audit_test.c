@@ -30,12 +30,14 @@
  */
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 
 #include <atf-c.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <paths.h>
 #include <signal.h>
 #include <stdio.h>
@@ -43,8 +45,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#include "emu_sysctl_paths.h"
 
 #define EMU_AUDIT_SYSCTL_BASE	"kern.emulation.audit"
 #define EMU_AUDIT_ENABLED	EMU_AUDIT_SYSCTL_BASE ".enabled"
@@ -104,9 +104,15 @@ get_sysctl_string(const char *name, char *value, size_t *len)
 static int
 set_sysctl_string(const char *name, const char *value)
 {
-	size_t len = strlen(value) + 1;
+	char buf[256];
+	size_t len;
 
-	if (sysctlbyname(name, NULL, NULL, (void *)value, len) < 0)
+	len = strlen(value) + 1;
+	if (len > sizeof(buf))
+		return (-1);
+
+	memcpy(buf, value, len);
+	if (sysctlbyname(name, NULL, NULL, buf, len) < 0)
 		return (-1);
 
 	return (0);
@@ -127,7 +133,7 @@ ATF_TC_BODY(audit_sysctl_defaults, tc)
 	int enabled, destination, rotation_size, rotation_count;
 	int min_severity, include_data;
 	size_t len;
-	char file_path[PATH_MAX];
+	char file_path[256];
 
 	/* Check audit enabled (should default to 0) */
 	ATF_REQUIRE_EQ(0, get_sysctl_int(EMU_AUDIT_ENABLED, &enabled));
@@ -235,7 +241,7 @@ ATF_TC_HEAD(audit_file_path_config, tc)
 }
 ATF_TC_BODY(audit_file_path_config, tc)
 {
-	char file_path[PATH_MAX];
+	char file_path[256];
 	size_t len;
 
 	/* Set custom file path */
@@ -326,7 +332,6 @@ ATF_TC_HEAD(audit_event_counter, tc)
 ATF_TC_BODY(audit_event_counter, tc)
 {
 	int event_count_before, event_count_after;
-	int enabled;
 
 	/* Get initial event count */
 	ATF_REQUIRE_EQ(0, get_sysctl_int(EMU_AUDIT_EVENT_COUNT, &event_count_before));
@@ -358,9 +363,7 @@ ATF_TC_HEAD(audit_permission_check, tc)
 }
 ATF_TC_BODY(audit_permission_check, tc)
 {
-	int allow_nonroot;
 	int saved_allow_nonroot;
-	size_t len = sizeof(saved_allow_nonroot);
 
 	/* Save current setting */
 	ATF_REQUIRE_EQ(0, get_sysctl_int(EMU_ALLOW_NONROOT, &saved_allow_nonroot));
@@ -420,7 +423,7 @@ ATF_TC_HEAD(audit_dual_output, tc)
 }
 ATF_TC_BODY(audit_dual_output, tc)
 {
-	int destination, enabled;
+	int destination;
 
 	/* Enable audit logging */
 	ATF_REQUIRE_EQ(0, set_sysctl_int(EMU_AUDIT_ENABLED, 1));
@@ -450,7 +453,6 @@ ATF_TC_HEAD(audit_rotation_trigger, tc)
 }
 ATF_TC_BODY(audit_rotation_trigger, tc)
 {
-	int rotation_size, rotation_count;
 	int saved_rotation_size, saved_rotation_count;
 
 	/* Save current settings */
@@ -488,7 +490,7 @@ ATF_TC_HEAD(audit_log_format, tc)
 }
 ATF_TC_BODY(audit_log_format, tc)
 {
-	char file_path[PATH_MAX];
+	char file_path[256];
 	size_t len;
 	struct stat sb;
 

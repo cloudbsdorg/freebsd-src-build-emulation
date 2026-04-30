@@ -51,8 +51,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "emu_sysctl_paths.h"
-
 #define EMU_SECURELEVEL_RESTRICTIONS	"kern.emulation.securelevel_restrictions"
 #define EMU_INSTANCE_COUNT		"kern.emulation.instance_count"
 #define EMU_MAX_INSTANCES		"kern.emulation.max_instances"
@@ -130,6 +128,13 @@ get_securelevel_restrictions(void)
 /*
  * Test: Securelevel restrictions can be enabled/disabled
  */
+ATF_TC(securelevel_toggle);
+ATF_TC_HEAD(securelevel_toggle, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "Verify securelevel restrictions can be toggled");
+	atf_tc_set_md_var(tc, "require.user", "root");
+}
 ATF_TC_BODY(securelevel_toggle, tc)
 {
 	int original_state;
