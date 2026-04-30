@@ -713,7 +713,15 @@ int
 emu_audit_read_log(struct uio *uio)
 {
 	struct sbuf *sb;
+	struct file *fp;
+	char *buf;
+	char *line_start;
+	char *line_end;
+	size_t bufsize;
+	size_t linelen;
 	int error;
+	off_t offset;
+	int fd;
 
 	/* Check access */
 	error = emu_audit_check_access(curthread);
@@ -725,10 +733,87 @@ emu_audit_read_log(struct uio *uio)
 	if (sb == NULL)
 		return (ENOMEM);
 
-	/* TODO: Read log file content into sbuf */
-	sbuf_printf(sb, "Audit log - %d events logged\n",
-	    g_audit_state.as_event_count);
+	/* Try to read from the audit log file */
+	mtx_lock(&g_audit_state.as_mtx);
 
+	if ((g_audit_state.as_config.ac_destination & EMU_AUDIT_DEST_FILE) != 0 &&
+	    g_audit_state.as_writer.aw_fp != NULL) {
+		/* File is open, try to read it */
+		/* Get the underlying file descriptor */
+		fd = fileno(g_audit_state.as_writer.aw_fp);
+		if (fd >= 0) {
+			/* Get file pointer */
+			fp = g_audit_state.as_writer.aw_fp;
+
+			/* Allocate buffer for reading */
+			bufsize = 65536; /* 64KB chunks */
+			buf = malloc(bufsize, M_TEMP, M_WAITOK);
+
+			/* Seek to beginning of file */
+			offset = 0;
+			if (fseeko(g_audit_state.as_writer.aw_fp, 0, SEEK_SET) != 0) {
+				/* Seek failed, just return summary */
+				mtx_unlock(&g_audit_state.as_mtx);
+				sbuf_printf(sb, "Audit log - %d events logged\n",
+				    g_audit_state.as_event_count);
+				sbuf_printf(sb, "Log file: %s\n\n",
+				    g_audit_state.as_config.ac_file_path);
+				sbuf_printf(sb, "(Seek to beginning of log file failed - "
+				    "log may be actively written)\n");
+				free(buf, M_TEMP);
+				goto copy_out;
+			}
+
+			/* Read and output file contents */
+			sbuf_printf(sb, "Audit log - %d events logged\n",
+			    g_audit_state.as_event_count);
+			sbuf_printf(sb, "Log file: %s\n\n",
+			    g_audit_state.as_config.ac_file_path);
+			sbuf_printf(sb, "=== Audit Log Contents ===\n\n");
+
+			while ((linelen = fread(buf, 1, bufsize - 1,
+			    g_audit_state.as_writer.aw_fp)) > 0) {
+				buf[linelen] = '\0';
+				/* Process line by line for cleaner output */
+				line_start = buf;
+				while ((line_end = strchr(line_start, '\n')) != NULL) {
+					*line_end = '\0';
+					sbuf_printf(sb, "%s\n", line_start);
+					line_start = line_end + 1;
+				}
+				/* Handle remaining content */
+				if (*line_start != '\0') {
+					sbuf_printf(sb, "%s", line_start);
+				}
+			}
+
+			/* Add footer */
+			sbuf_printf(sb, "\n=== End of Audit Log ===\n");
+
+			free(buf, M_TEMP);
+		} else {
+			/* No valid fd, just return summary */
+			sbuf_printf(sb, "Audit log - %d events logged\n",
+			    g_audit_state.as_event_count);
+			sbuf_printf(sb, "Log file: %s\n\n",
+			    g_audit_state.as_config.ac_file_path);
+			sbuf_printf(sb, "(Log file handle not accessible)\n");
+		}
+	} else {
+		/* File logging not enabled */
+		sbuf_printf(sb, "Audit log - %d events logged\n",
+		    g_audit_state.as_event_count);
+		sbuf_printf(sb, "\nFile logging is not enabled.\n");
+		sbuf_printf(sb, "Current destination: %d\n",
+		    g_audit_state.as_config.ac_destination);
+		sbuf_printf(sb, "To enable file logging, set:\n");
+		sbuf_printf(sb, "  sysctl kern.emulation.audit.destination=2\n");
+		sbuf_printf(sb, "  sysctl kern.emulation.audit.file_path=\"/path/to/log\"\n");
+	}
+
+	mtx_unlock(&g_audit_state.as_mtx);
+
+copy_out:
 	/* Copy to userland */
 	error = sbuf_finish(sb);
 	if (error == 0) {
