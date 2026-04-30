@@ -78,6 +78,7 @@ struct emu_stack_capture {
 	time_t			sc_timestamp;
 	char			sc_arch[16];
 	bool			sc_valid;
+	bool			sc_test_data;  /* True if using sample/test data */
 };
 
 static struct emu_stack_capture emu_stack_captures[MAXEMUINSTANCES];
@@ -136,15 +137,17 @@ emu_stack_capture(uint64_t inst_id, const char *arch)
 	strlcpy(sc->sc_arch, arch, sizeof(sc->sc_arch));
 
 	/*
-	 * TODO: In a real implementation, this would:
-	 * 1. Pause the emulated instance
-	 * 2. Extract register state (PC, SP, FP)
-	 * 3. Walk the guest kernel stack frames
-	 * 4. Resolve symbols via DDB/KDB integration
-	 * 5. Populate sc_frames[] with the captured data
+	 * Stack capture from guest is not yet implemented.
+	 * This function provides sample/test data to validate the
+	 * stack capture infrastructure. Set sc_test_data = true
+	 * to indicate this is test data.
 	 *
-	 * For now, we provide a sample stack trace for testing.
+	 * Real implementation requires:
+	 * 1. Integration with bhyve/vmm for guest memory access
+	 * 2. Guest kernel stack walking based on guest architecture
+	 * 3. Symbol resolution via guest symbol table
 	 */
+	sc->sc_test_data = true;
 
 	/* Sample stack trace for testing */
 	sc->sc_num_frames = 5;
@@ -212,6 +215,13 @@ emu_stack_get(uint64_t inst_id, struct sbuf *sb)
 	sbuf_printf(sb, "Stack trace for instance %lu (%s):\n",
 	    (u_long)inst_id, sc->sc_arch);
 	sbuf_printf(sb, "Timestamp: %ld\n", (long)sc->sc_timestamp);
+
+	/* Warn if using test data */
+	if (sc->sc_test_data) {
+		sbuf_printf(sb, "\n[NOTE: This is sample/test data. "
+		    "Guest stack capture not yet implemented.]\n");
+	}
+
 	sbuf_printf(sb, "Number of frames: %d\n\n", sc->sc_num_frames);
 	sbuf_printf(sb, "%-4s %-20s %-20s %-20s %-20s %s\n",
 	    "Frame", "PC", "SP", "FP", "Module", "Symbol");
