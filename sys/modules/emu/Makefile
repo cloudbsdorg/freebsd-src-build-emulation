@@ -8,6 +8,7 @@
 
 KMOD=	emu
 SRCS=
+MAN=	emulation.4
 
 # Module dependencies - these ensure proper load order
 # The master module depends on all sub-modules

@@ -1,0 +1,376 @@
+.\"-
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" Copyright (c) 2026 Mark LaPointe <mark@cloudbsd.org>
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+.\" STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+.\" ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+.\" POSSIBILITY OF SUCH DAMAGE.
+.\"
+.Dd April 30, 2026
+.Dt EMULATION 4
+.Os
+.Sh NAME
+.Nm emulation
+.Nd FreeBSD kernel emulation framework
+.Sh SYNOPSIS
+The
+.Fx
+emulation framework is provided by the following loadable kernel modules:
+.Bl -tag -width "emu_core.ko" -compact
+.It Pa emu_core.ko
+Core emulation framework
+.It Pa emu_amd64.ko
+AMD64 architecture support
+.It Pa emu_i386.ko
+i386 architecture support
+.It Pa emu_arm64.ko
+ARM64 architecture support
+.It Pa emu_arm.ko
+ARM architecture support
+.It Pa emu_powerpc.ko
+PowerPC architecture support
+.It Pa emu_riscv.ko
+RISC-V architecture support
+.It Pa emu.ko
+Master module (loads all above)
+.El
+.Pp
+To load all emulation modules:
+.Dl "kldload emu"
+.Sh DESCRIPTION
+The
+.Fx
+emulation framework provides a unified mechanism for running
+emulated instances of different architectures on a
+.Fx
+host.
+It supports both native virtualization via
+.Xr bhyve 4
+and pure software emulation for cross-architecture testing.
+.Pp
+The framework consists of:
+.Bl -tag -width Ds -compact
+.It Kernel Module
+.Pa emu_core.ko
+provides the core framework including instance management, sysctl
+interface, and resource limits.
+.It Per-Architecture Modules
+.Pa emu_<arch>.ko
+modules provide architecture-specific emulation support.
+.It Userland Tool
+.Xr emu 8
+provides the command-line interface for managing emulated instances.
+.El
+.Ss Instance Lifecycle
+An emulated instance goes through the following states:
+.Bl -tag -width "INITIALIZING" -compact
+.It INITIALIZING
+Instance is being created
+.It STOPPED
+Instance exists but is not running
+.It RUNNING
+Instance is actively executing
+.It PAUSED
+Instance execution is paused
+.It ERROR
+Instance encountered an error
+.El
+.Ss Supported Architectures
+The framework supports the following guest architectures:
+.Bl -tag -width "amd64" -compact
+.It amd64
+x86-64 (64-bit)
+.It i386
+x86 (32-bit)
+.It arm64
+AArch64 (64-bit ARM)
+.It arm
+ARM (32-bit)
+.It powerpc
+PowerPC
+.It riscv
+RISC-V (64-bit)
+.El
+.Ss Execution Modes
+.Bl -tag -width "EMU_MODE_EMULATOR" -compact
+.It EMU_MODE_AUTO
+Automatically select best mode based on architecture (default)
+.It EMU_MODE_BHYVE
+Use bhyve/VMM virtualization (native architectures only)
+.It EMU_MODE_EMULATOR
+Use custom software emulator (all architectures)
+.El
+.Sh SYSCTL VARIABLES
+The following sysctl variables are available under the
+.Va kern.emulation
+tree:
+.Bl -tag -width Fl
+.It Va kern.emulation.allow_nonroot
+.Pq Li int
+Allow non-root users in the emu group to create and manage emulation
+instances.
+Default is 0 (root only).
+Writable only by root.
+.It Va kern.emulation.modules_loaded
+.Pq Li string
+Comma-separated list of currently loaded emulation modules.
+Read-only.
+.It Va kern.emulation.instance_count
+.Pq Li int
+Total number of emulated instances.
+Read-only.
+.It Va kern.emulation.max_instances
+.Pq Li int
+Maximum concurrent emulated instances allowed.
+Default is 16.
+.It Va kern.emulation.max_memory_per_instance
+.Pq Li int
+Maximum memory per instance in megabytes.
+Default is 4096.
+.It Va kern.emulation.max_instances_per_user
+.Pq Li int
+Maximum instances per non-root user.
+Default is 4.
+.It Va kern.emulation.max_memory_per_user
+.Pq Li int
+Maximum total memory for all instances per user in megabytes.
+Default is 4096.
+.It Va kern.emulation.max_cpu_time_per_instance
+.Pq Li int
+Maximum CPU time per instance in seconds (0 = unlimited).
+Default is 0.
+.It Va kern.emulation.sandbox_capsicum
+.Pq Li int
+Enable Capsicum sandboxing for emulator processes (default: 1).
+.It Va kern.emulation.sandbox_strict
+.Pq Li int
+Fail instance creation if Capsicum is unavailable (default: 0).
+.It Va kern.emulation.drop_privileges
+.Pq Li int
+Drop root privileges after setup (default: 1).
+.It Va kern.emulation.watchdog_seconds
+.Pq Li int
+Default watchdog timeout in seconds.
+Default is 30.
+.It Va kern.emulation.securelevel_restrictions
+.Pq Li int
+Enable securelevel-aware operation restrictions (default: 1).
+.El
+.Ss Memory Management Sysctls
+.Bl -tag -width Fl
+.It Va kern.emulation.memory.policy
+.Pq Li string
+Memory allocation policy:
+.Bl -tag -width "demand" -compact
+.It prealloc
+Pre-allocate all guest memory (default)
+.It demand
+Use demand paging with mmap(MAP_NORESERVE)
+.El
+.It Va kern.emulation.memory.overcommit
+.Pq Li int
+Allow memory overcommit (0=disabled, 1=warn, 2=silent).
+Default is 0 (disabled).
+.It Va kern.emulation.memory.warn_percent
+.Pq Li int
+Warn when configured memory exceeds this percentage of available host RAM.
+Default is 80.
+.It Va kern.emulation.memory.balloon_min_pct
+.Pq Li int
+Minimum balloon size as percentage of allocated memory.
+Default is 50.
+.It Va kern.emulation.memory.balloon_interval
+.Pq Li int
+Balloon adjustment interval in seconds.
+Default is 30.
+.It Va kern.emulation.memory.system_reserve_percent
+.Pq Li int
+Percentage of total physical memory reserved for system use.
+Default is 10.
+.It Va kern.emulation.memory.total
+.Pq Li int
+Total physical memory in bytes.
+Read-only.
+.It Va kern.emulation.memory.system_used
+.Pq Li int
+System-wide used memory in bytes.
+Read-only.
+.It Va kern.emulation.memory.available
+.Pq Li int
+Available memory for emulation in bytes.
+Read-only.
+.It Va kern.emulation.memory.instances_used
+.Pq Li int
+Total memory used by all emulation instances in bytes.
+Read-only.
+.It Va kern.emulation.memory.scrub.enabled
+.Pq Li int
+Enable memory scrubbing on instance destroy (default: 1).
+.It Va kern.emulation.memory.scrub.method
+.Pq Li string
+Memory scrubbing method:
+.Bl -tag -width "zero" -compact
+.It zero
+Fill with zeros (default)
+.It random
+Fill with random data
+.It pattern
+Fill with configurable pattern
+.El
+.El
+.Ss Audit Sysctls
+.Bl -tag -width Fl
+.It Va kern.emulation.audit.enabled
+.Pq Li int
+Enable audit logging (default: 1).
+.It Va kern.emulation.audit.destination
+.Pq Li int
+Audit log destination (0=none, 1=syslog, 2=file, 3=both).
+Default is 1.
+.It Va kern.emulation.audit.file
+.Pq Li string
+Audit log file path.
+Default is
+.Pa /var/log/emu_audit.log .
+.It Va kern.emulation.audit.rotation_size
+.Pq Li int
+Audit log rotation size in bytes.
+Default is 10485760 (10MB).
+.It Va kern.emulation.audit.rotation_count
+.Pq Li int
+Number of rotated log files to keep.
+Default is 5.
+.It Va kern.emulation.audit.min_severity
+.Pq Li int
+Minimum severity level to log (0=EMERG, 7=DEBUG).
+Default is 6 (INFO).
+.It Va kern.emulation.audit.event_count
+.Pq Li int
+Total number of audit events logged.
+Read-only.
+.El
+.Ss Per-Module Sysctls
+For each loaded module, the following sysctls are available under
+.Va kern.emulation.module.<name> :
+.Bl -tag -width Fl
+.It Va kern.emulation.module.<name>.version
+.Pq Li int
+Module version number.
+Read-only.
+.It Va kern.emulation.module.<name>.refcount
+.Pq Li int
+Current reference count (number of instances using this module).
+Read-only.
+.El
+.Ss Instance Sysctls
+For each instance, the following sysctls are available under
+.Va kern.emulation.instance.<name> :
+.Bl -tag -width Fl
+.It Va kern.emulation.instance.<name>.state
+.Pq Li string
+Instance state (stopped, running, paused, error).
+Read-only.
+.It Va kern.emulation.instance.<name>.arch
+.Pq Li string
+Target architecture.
+Read-only.
+.It Va kern.emulation.instance.<name>.memory_used
+.Pq Li int
+Current memory usage in bytes.
+Read-only.
+.It Va kern.emulation.instance.<name>.cpu_time
+.Pq Li int
+Total CPU time used in nanoseconds.
+Read-only.
+.El
+.Sh KERNEL OPTIONS
+The following kernel options enable the emulation framework build:
+.Bl -tag -width Fl
+.It Va MK_EMULATION
+Build the emulation framework (default: no).
+When enabled, builds:
+.Bl -tag -width "emu.8" -compact
+.It Kernel modules in
+.Pa sys/modules/emu*/
+.It Userland tool
+.Pa usr.sbin/emu/
+.It Man pages
+.Pa usr.sbin/emu/emu.8 ,
+.Pa usr.sbin/emu/emu.conf.5 ,
+.Pa sys/emulation/emulation.4
+.El
+.It Va MK_TESTS
+Build the emulation framework test suite (default: no).
+Requires
+.Va MK_EMULATION .
+.El
+.Sh LOADING
+The emulation framework modules can be loaded individually or as a complete set:
+.Bl -tag -width "kldload emu" -compact
+.It Li "kldload emu_core"
+Load only the core framework
+.It Li "kldload emu_amd64"
+Load AMD64 support
+.It Li "kldload emu"
+Load master module (loads all modules in correct dependency order)
+.El
+.Pp
+To unload, use
+.Xr kldunload 8 :
+.Dl "kldunload emu"
+.Pp
+Note: Modules cannot be unloaded while instances are running.
+.Sh FILES
+.Bl -tag -width "kern.emulation" -compact
+.It Va /var/emu/
+Default instance data directory
+.It Va /var/emu/instances/
+Per-instance data directories
+.It Va /var/cache/emu/images/
+Disk image cache
+.It Va /var/log/emu_audit.log
+Default audit log location
+.It Va /boot/kernel/emu*.ko
+Kernel modules
+.El
+.Sh SEE ALSO
+.Bl -tag -width Ds -compact
+.It Xr emu 8
+Userland management tool
+.It Xr emu.conf 5
+Configuration file
+.It Xr bhyve 4
+Native virtualization
+.It Xr vmm 4
+Virtual Machine Monitor
+.It Xr kldload 8
+Load kernel modules
+.It Xr kldunload 8
+Unload kernel modules
+.El
+.Sh HISTORY
+The emulation framework first appeared in
+.Fx 15.0 .
+.Sh AUTHORS
+.An Mark LaPointe Aq Mt mark@cloudbsd.org
+.Sh BUGS
+Report bugs at
+.Lk https://github.com/freebsd/freebsd-src/issues
