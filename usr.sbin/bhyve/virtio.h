@@ -30,6 +30,7 @@
 #define	_BHYVE_VIRTIO_H_
 
 #include <machine/atomic.h>
+#include <pthread.h>
 
 #include <dev/virtio/virtio.h>
 #include <dev/virtio/virtio_ring.h>

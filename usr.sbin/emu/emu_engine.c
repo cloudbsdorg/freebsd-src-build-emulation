@@ -630,8 +630,11 @@ emu_mem_write8(struct emu_guest_mem *mem, uint64_t guest_addr, uint8_t value)
 }
 
 /*
- * Write 16-bit value to guest memory
- * Performs bounds checking and region validation
+ * Note: emu_mem_write16/32/64 are defined as static inline in emu_mem.h
+ */
+
+/*
+ * Bounds-checked 16-bit write
  */
 enum emu_mem_access
 emu_mem_write16(struct emu_guest_mem *mem, uint64_t guest_addr, uint16_t value)
@@ -664,8 +667,7 @@ emu_mem_write16(struct emu_guest_mem *mem, uint64_t guest_addr, uint16_t value)
 }
 
 /*
- * Write 32-bit value to guest memory
- * Performs bounds checking and region validation
+ * Bounds-checked 32-bit write
  */
 enum emu_mem_access
 emu_mem_write32(struct emu_guest_mem *mem, uint64_t guest_addr, uint32_t value)
@@ -698,8 +700,7 @@ emu_mem_write32(struct emu_guest_mem *mem, uint64_t guest_addr, uint32_t value)
 }
 
 /*
- * Write 64-bit value to guest memory
- * Performs bounds checking and region validation
+ * Bounds-checked 64-bit write
  */
 enum emu_mem_access
 emu_mem_write64(struct emu_guest_mem *mem, uint64_t guest_addr, uint64_t value)
@@ -1014,7 +1015,7 @@ emu_mem_dump_regions(struct emu_guest_mem *mem)
  * Check if a file descriptor is essential for emulator operation
  * Essential FDs are kept open during sandboxing
  */
-static bool
+bool
 emu_is_essential_fd(int fd)
 {
 	/* Stdio streams are always essential */
