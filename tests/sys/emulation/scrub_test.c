@@ -46,8 +46,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "emu_sysctl_paths.h"
-
 #define EMU_SCRUB_ENABLED		"kern.emulation.memory.scrub.enabled"
 #define EMU_SCRUB_METHOD		"kern.emulation.memory.scrub.method"
 
