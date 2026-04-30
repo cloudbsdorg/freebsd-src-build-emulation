@@ -56,6 +56,7 @@
 
 #include "emulation/emu.h"
 #include "emulation/emu_smp.h"
+#include "emulation/emu_instance.h"
 
 /*
  * Host CPU topology
@@ -222,6 +223,7 @@ emu_vcpu_array_init(struct emu_vcpu_state **vcpus, int num_vcpus)
 
 	/* Initialize each vCPU state */
 	for (i = 0; i < num_vcpus; i++) {
+		mtx_init(&array[i].vcpu_mtx, "vcpu mutex", NULL, MTX_DEF);
 		array[i].vcpu_id = i;
 		array[i].state = EMU_VCPU_STOPPED;
 		array[i].socket_id = i / emu_host_topology.cores_per_socket;
@@ -251,6 +253,7 @@ emu_vcpu_array_destroy(struct emu_vcpu_state *vcpus, int num_vcpus)
 		/* Free any vCPU-specific resources */
 		if (vcpus[i].regs != NULL)
 			free(vcpus[i].regs, M_EMU);
+		mtx_destroy(&vcpus[i].vcpu_mtx);
 	}
 
 	free(vcpus, M_EMU);
@@ -268,6 +271,7 @@ emu_vcpu_create(struct emu_vcpu_state *vcpu, int vcpu_id, int socket_id,
 		return (EINVAL);
 
 	memset(vcpu, 0, sizeof(struct emu_vcpu_state));
+	mtx_init(&vcpu->vcpu_mtx, "vcpu mutex", NULL, MTX_DEF);
 	vcpu->vcpu_id = vcpu_id;
 	vcpu->socket_id = socket_id;
 	vcpu->core_id = core_id;
@@ -277,8 +281,10 @@ emu_vcpu_create(struct emu_vcpu_state *vcpu, int vcpu_id, int socket_id,
 
 	/* Allocate register state buffer */
 	vcpu->regs = malloc(sizeof(struct emu_cpu_state), M_EMU, M_WAITOK | M_ZERO);
-	if (vcpu->regs == NULL)
+	if (vcpu->regs == NULL) {
+		mtx_destroy(&vcpu->vcpu_mtx);
 		return (ENOMEM);
+	}
 
 	return (0);
 }
@@ -296,43 +302,248 @@ emu_vcpu_destroy(struct emu_vcpu_state *vcpu)
 	if (vcpu->regs != NULL)
 		free(vcpu->regs, M_EMU);
 
+	mtx_destroy(&vcpu->vcpu_mtx);
 	memset(vcpu, 0, sizeof(struct emu_vcpu_state));
 }
 
 /*
  * Start a vCPU
+ *
+ * Transitions the vCPU from STOPPED to RUNNING state and records
+ * the start time for CPU time accounting. In a software emulation
+ * context, this signals the userspace emulator process to begin
+ * executing instructions on this vCPU.
  */
 int
 emu_vcpu_start(struct emu_vcpu_state *vcpu)
 {
+	struct proc *p;
+	struct timeval now;
 
 	if (vcpu == NULL)
 		return (EINVAL);
 
-	if (vcpu->state == EMU_VCPU_RUNNING)
-		return (EBUSY);
+	mtx_lock(&vcpu->vcpu_mtx);
 
+	if (vcpu->state == EMU_VCPU_RUNNING) {
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (EBUSY);
+	}
+
+	if (vcpu->state == EMU_VCPU_ERROR) {
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (EIO);
+	}
+
+	/* Record start time for CPU accounting */
+	getmicrouptime(&now);
+	vcpu->start_time = now;
 	vcpu->state = EMU_VCPU_RUNNING;
-	/* TODO: Actually start vCPU execution */
+
+	/* Update last activity timestamp */
+	vcpu->last_activity = now.tv_sec;
+
+	/*
+	 * Signal the emulator process to start vCPU execution.
+	 * The instance PID is stored during instance creation.
+	 */
+	if (vcpu->inst_id != 0) {
+		/*
+		 * Look up the emulator process by instance ID.
+		 * In practice, the userspace emulator would listen for
+		 * SIGUSR1 to begin vCPU execution.
+		 */
+		struct emu_instance *inst;
+		mtx_lock(&emu_instance_lock);
+		inst = emu_find_instance(vcpu->inst_id);
+		if (inst != NULL && inst->inst_pid != 0) {
+			p = pfind(inst->inst_pid);
+			if (p != NULL) {
+				/* Signal the emulator process */
+				psignal(p, SIGUSR1);
+				prele(p);
+			}
+		}
+		mtx_unlock(&emu_instance_lock);
+	}
+
+	mtx_unlock(&vcpu->vcpu_mtx);
 
 	return (0);
 }
 
 /*
  * Stop a vCPU
+ *
+ * Transitions the vCPU from RUNNING to STOPPED state and updates
+ * the CPU time accumulator with the elapsed time since the last
+ * start. In a software emulation context, this signals the
+ * userspace emulator process to halt execution on this vCPU.
  */
 int
 emu_vcpu_stop(struct emu_vcpu_state *vcpu)
 {
+	struct proc *p;
+	struct timeval now, elapsed;
 
 	if (vcpu == NULL)
 		return (EINVAL);
 
-	if (vcpu->state == EMU_VCPU_STOPPED)
-		return (0);
+	mtx_lock(&vcpu->vcpu_mtx);
 
+	if (vcpu->state == EMU_VCPU_STOPPED) {
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (0);
+	}
+
+	if (vcpu->state == EMU_VCPU_PAUSED) {
+		/*
+		 * vCPU is paused, not running. Just update state.
+		 * CPU time accounting continues when paused.
+		 */
+		vcpu->state = EMU_VCPU_STOPPED;
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (0);
+	}
+
+	/* Calculate elapsed CPU time since last start */
+	getmicrouptime(&now);
+	timersub(&now, &vcpu->start_time, &elapsed);
+
+	/* Accumulate CPU time in nanoseconds */
+	vcpu->cpu_time += (uint64_t)elapsed.tv_sec * 1000000000ULL +
+	    (uint64_t)elapsed.tv_usec * 1000ULL;
+
+	/* Update state and last activity */
 	vcpu->state = EMU_VCPU_STOPPED;
-	/* TODO: Actually stop vCPU execution */
+	vcpu->last_activity = now.tv_sec;
+
+	/*
+	 * Signal the emulator process to stop vCPU execution.
+	 * The instance PID is stored during instance creation.
+	 */
+	if (vcpu->inst_id != 0) {
+		struct emu_instance *inst;
+		mtx_lock(&emu_instance_lock);
+		inst = emu_find_instance(vcpu->inst_id);
+		if (inst != NULL && inst->inst_pid != 0) {
+			p = pfind(inst->inst_pid);
+			if (p != NULL) {
+				/* Signal the emulator process to stop */
+				psignal(p, SIGUSR2);
+				prele(p);
+			}
+		}
+		mtx_unlock(&emu_instance_lock);
+	}
+
+	mtx_unlock(&vcpu->vcpu_mtx);
+
+	return (0);
+}
+
+/*
+ * Pause a vCPU
+ *
+ * Transitions the vCPU from RUNNING to PAUSED state. Unlike stop,
+ * pause preserves the running state for later resumption. The CPU
+ * time accumulator is updated similarly to stop.
+ */
+int
+emu_vcpu_pause(struct emu_vcpu_state *vcpu)
+{
+	struct timeval now, elapsed;
+
+	if (vcpu == NULL)
+		return (EINVAL);
+
+	mtx_lock(&vcpu->vcpu_mtx);
+
+	if (vcpu->state == EMU_VCPU_STOPPED) {
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (EBUSY);
+	}
+
+	if (vcpu->state == EMU_VCPU_PAUSED) {
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (0);
+	}
+
+	/* Calculate elapsed CPU time since last start */
+	getmicrouptime(&now);
+	timersub(&now, &vcpu->start_time, &elapsed);
+
+	/* Accumulate CPU time in nanoseconds */
+	vcpu->cpu_time += (uint64_t)elapsed.tv_sec * 1000000000ULL +
+	    (uint64_t)elapsed.tv_usec * 1000ULL;
+
+	/* Update state and last activity */
+	vcpu->state = EMU_VCPU_PAUSED;
+	vcpu->last_activity = now.tv_sec;
+
+	/* Signal the emulator process to pause */
+	if (vcpu->inst_id != 0) {
+		struct emu_instance *inst;
+		mtx_lock(&emu_instance_lock);
+		inst = emu_find_instance(vcpu->inst_id);
+		if (inst != NULL && inst->inst_pid != 0) {
+			struct proc *p = pfind(inst->inst_pid);
+			if (p != NULL) {
+				psignal(p, SIGSTOP);
+				prele(p);
+			}
+		}
+		mtx_unlock(&emu_instance_lock);
+	}
+
+	mtx_unlock(&vcpu->vcpu_mtx);
+
+	return (0);
+}
+
+/*
+ * Resume a vCPU
+ *
+ * Transitions the vCPU from PAUSED to RUNNING state. The vCPU
+ * resumes execution from where it was paused.
+ */
+int
+emu_vcpu_resume(struct emu_vcpu_state *vcpu)
+{
+	struct timeval now;
+
+	if (vcpu == NULL)
+		return (EINVAL);
+
+	mtx_lock(&vcpu->vcpu_mtx);
+
+	if (vcpu->state != EMU_VCPU_PAUSED) {
+		mtx_unlock(&vcpu->vcpu_mtx);
+		return (EBUSY);
+	}
+
+	/* Record new start time for continued CPU accounting */
+	getmicrouptime(&now);
+	vcpu->start_time = now;
+	vcpu->state = EMU_VCPU_RUNNING;
+	vcpu->last_activity = now.tv_sec;
+
+	/* Signal the emulator process to resume */
+	if (vcpu->inst_id != 0) {
+		struct emu_instance *inst;
+		mtx_lock(&emu_instance_lock);
+		inst = emu_find_instance(vcpu->inst_id);
+		if (inst != NULL && inst->inst_pid != 0) {
+			struct proc *p = pfind(inst->inst_pid);
+			if (p != NULL) {
+				psignal(p, SIGCONT);
+				prele(p);
+			}
+		}
+		mtx_unlock(&emu_instance_lock);
+	}
+
+	mtx_unlock(&vcpu->vcpu_mtx);
 
 	return (0);
 }

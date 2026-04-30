@@ -69,6 +69,9 @@ struct emu_vcpu_state {
 	struct emu_cpu_state	*regs;		/* Register state */
 	uint64_t		cpu_time;	/* CPU time used (ns) */
 	uint64_t		last_activity;	/* Last activity timestamp */
+	uint64_t		inst_id;	/* Parent instance ID */
+	struct mtx		vcpu_mtx;	/* Mutex for vCPU state */
+	struct timeval		start_time;	/* When vCPU started running */
 };
 
 /*
@@ -98,6 +101,8 @@ int	emu_vcpu_create(struct emu_vcpu_state *vcpu, int vcpu_id,
 void	emu_vcpu_destroy(struct emu_vcpu_state *vcpu);
 int	emu_vcpu_start(struct emu_vcpu_state *vcpu);
 int	emu_vcpu_stop(struct emu_vcpu_state *vcpu);
+int	emu_vcpu_pause(struct emu_vcpu_state *vcpu);
+int	emu_vcpu_resume(struct emu_vcpu_state *vcpu);
 
 /* Utility functions */
 const char *emu_vcpu_state_str(enum emu_vcpu_status state);

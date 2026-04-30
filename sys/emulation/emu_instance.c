@@ -447,7 +447,7 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		return (error);
 	}
 
-	/* Assign APIC IDs based on topology */
+	/* Assign APIC IDs and instance reference based on topology */
 	for (int i = 0; i < num_vcpus; i++) {
 		int socket_id = i / (num_vcpus / num_sockets);
 		int core_id = i % (num_vcpus / num_sockets);
@@ -455,6 +455,7 @@ emu_instance_create(const char *name, uid_t uid, gid_t gid, uint64_t memory_limi
 		inst->inst_vcpus[i].core_id = core_id;
 		inst->inst_vcpus[i].thread_id = 0;
 		inst->inst_vcpus[i].apic_id = emu_calc_apic_id(socket_id, core_id, 0);
+		inst->inst_vcpus[i].inst_id = inst->inst_id;
 	}
 
 	/* Create per-vCPU sysctl interfaces */
