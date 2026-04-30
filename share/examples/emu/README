@@ -1,0 +1,128 @@
+# FreeBSD Emulation Framework - Example Configurations
+
+This directory contains example configuration files for the FreeBSD emulation
+framework at different security levels. Choose the configuration that best
+matches your use case.
+
+## Configuration Files
+
+| File | Security Level | Use Case |
+|------|---------------|----------|
+| `emu-basic.conf` | Insecure | Local development, isolated testing |
+| `emu-standard.conf` | Standard | Development servers, general use |
+| `emu-high.conf` | High | Production servers, sensitive data |
+| `emu-maximum.conf` | Maximum | Critical infrastructure, highest security |
+
+## Security Level Comparison
+
+| Feature | Basic | Standard | High | Maximum |
+|---------|-------|----------|------|---------|
+| Securelevel | -1 | 1 | 3 | 3 |
+| MAC Enforcement | Off | On | On | On |
+| Veriexec Check | Off | Auto | On | On |
+| Audit Logging | Off | On | On | On |
+| Network Isolation | Off | Off | On | On |
+| Swap Encryption | Off | Off | On | On |
+| Memory Encryption | Off | Off | On | On |
+| Huge Pages | Off | Auto | On | On |
+| NUMA Awareness | Off | On | On | On |
+| RCTL Limits | Off | On | On | On |
+| Max Instances | 128 | 32 | 16 | 8 |
+| Max Memory (MB) | 131072 | 65536 | 32768 | 16384 |
+
+## Installation
+
+1. Choose the configuration matching your security requirements:
+
+   ```bash
+   # For development (insecure)
+   cp emu-basic.conf /usr/local/etc/emu/emu.conf
+
+   # For production (high security)
+   cp emu-high.conf /usr/local/etc/emu/emu.conf
+   ```
+
+2. Review and adjust settings as needed for your environment.
+
+3. Create required directories:
+
+   ```bash
+   mkdir -p /var/emu /var/cache/emu/images
+   chmod 750 /var/emu /var/cache/emu/images
+   ```
+
+## Host System Requirements
+
+### Basic Configuration
+- FreeBSD 14.0 or later
+- No special requirements
+
+### Standard Configuration
+- FreeBSD 14.0 or later
+- MAC framework enabled in kernel
+- Sufficient system resources (4GB+ RAM recommended)
+
+### High Configuration
+- FreeBSD 14.0 or later
+- MAC framework enabled in kernel
+- MAC veriexec module loaded
+- At least 8GB RAM recommended
+- Swap encryption requires memory encryption capable CPU (AES-NI)
+
+### Maximum Configuration
+- FreeBSD 14.0 or later
+- MAC framework enabled in kernel
+- MAC veriexec module loaded with fingerprints configured
+- At least 16GB RAM recommended
+- CPU affinity requires system with 4+ cores
+- All memory encryption features require capable CPU
+
+## Kernel Module Loading
+
+Load the emulation framework kernel module:
+
+```bash
+# As root
+kldload emu_core
+```
+
+To load at boot, add to `/etc/rc.conf`:
+
+```
+emu_load="YES"
+```
+
+## Verification
+
+Verify the module is loaded:
+
+```bash
+kldstat | grep emu_core
+```
+
+Check sysctl settings:
+
+```bash
+sysctl kern.emulation
+```
+
+## Documentation
+
+See the following man pages for more information:
+
+- `emu(8)` - Emulation framework command reference
+- `emu.conf(5)` - Configuration file format
+
+## Troubleshooting
+
+### Module fails to load
+Check dmesg for errors:
+```bash
+dmesg | tail -50
+```
+
+### Permission denied errors
+Ensure you have appropriate privileges or are running as root.
+
+### Configuration not being read
+Check that `/usr/local/etc/emu/emu.conf` exists and is readable.

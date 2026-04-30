@@ -10,6 +10,7 @@ LDIRS=	BSD_daemon \
 	FreeBSD_version \
 	bootforth \
 	csh \
+	emu \
 	etc \
 	find_interface \
 	flua \
@@ -70,6 +71,14 @@ SE_BOOTFORTH= \
 SE_DIRS+=	csh
 SE_CSHPACKAGE=	csh
 SE_CSH=		dot.cshrc
+
+SE_DIRS+=	emu
+SE_EMU= \
+	README \
+	emu-basic.conf \
+	emu-standard.conf \
+	emu-high.conf \
+	emu-maximum.conf
 
 SE_DIRS+=	etc
 SE_ETC= \
