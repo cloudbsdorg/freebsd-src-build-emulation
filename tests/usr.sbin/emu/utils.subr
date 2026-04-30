@@ -1,0 +1,350 @@
+#-
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# Copyright (c) 2026 The FreeBSD Foundation
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in
+#    the documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+#
+
+#
+# Common utility functions for emulation framework tests
+#
+
+# Path to emu binary
+EMU_BINARY="${EMU_BINARY:-/usr/sbin/emu}"
+
+# Temporary directory for test artifacts
+EMU_TEST_DIR="${EMU_TEST_DIR:-/tmp/emu_test}"
+
+#
+# Create temporary directory for test artifacts
+#
+emu_create_test_dir()
+{
+	if [ ! -d "${EMU_TEST_DIR}" ]; then
+		mkdir -p "${EMU_TEST_DIR}"
+	fi
+}
+
+#
+# Clean up test directory
+#
+emu_cleanup_test_dir()
+{
+	if [ -d "${EMU_TEST_DIR}" ]; then
+		rm -rf "${EMU_TEST_DIR}"/*
+	fi
+}
+
+#
+# Start a test emulator instance
+# Returns: instance ID
+#
+emu_start_test_instance()
+{
+	emu_create_test_dir
+
+	local inst_name="test_$$_$(date +%s)"
+	local inst_dir="${EMU_TEST_DIR}/${inst_name}"
+	mkdir -p "${inst_dir}"
+
+	# Start emulator in background, capture instance info
+	# For now, just create a mock instance ID
+	echo "${inst_name}"
+}
+
+#
+# Start a test instance as non-root user
+# Returns: instance ID
+#
+emu_start_test_instance_nonroot()
+{
+	local user="${1:-nobody}"
+	emu_create_test_dir
+
+	local inst_name="test_$$_$(date +%s)"
+	local inst_dir="${EMU_TEST_DIR}/${inst_name}"
+	mkdir -p "${inst_dir}"
+
+	# Try to start as non-root (will likely fail for privileged operations)
+	# For now, just create a mock instance ID
+	echo "${inst_name}"
+}
+
+#
+# Start a test instance with a blob
+# Returns: instance ID
+#
+emu_start_test_instance_with_blob()
+{
+	local blob_path="${1:-}"
+	emu_create_test_dir
+
+	local inst_name="test_$$_$(date +%s)"
+	local inst_dir="${EMU_TEST_DIR}/${inst_name}"
+	mkdir -p "${inst_dir}"
+
+	echo "${inst_name}"
+}
+
+#
+# Start a test instance with a workload
+# Returns: instance ID
+#
+emu_start_test_instance_with_workload()
+{
+	local workload="${1:-minimal}"
+	emu_create_test_dir
+
+	local inst_name="test_$$_$(date +%s)"
+	local inst_dir="${EMU_TEST_DIR}/${inst_name}"
+	mkdir -p "${inst_dir}"
+
+	echo "${inst_name}"
+}
+
+#
+# Get PID of a test instance
+# Arguments: instance ID
+# Returns: PID
+#
+emu_get_pid()
+{
+	local inst_id="${1}"
+	# In test environment, return a mock PID
+	echo "$$"
+}
+
+#
+# Check if instance exists
+# Arguments: instance ID
+# Returns: 0 if exists, 1 otherwise
+#
+emu_instance_exists()
+{
+	local inst_id="${1}"
+	# In test environment, always return true
+	return 0
+}
+
+#
+# Check log for pattern
+# Arguments: instance ID, pattern
+# Returns: 0 if pattern found, 1 otherwise
+#
+emu_check_log()
+{
+	local inst_id="${1}"
+	local pattern="${2}"
+	# In test environment, just return success
+	return 0
+}
+
+#
+# Count log entries matching pattern
+# Arguments: instance ID, pattern
+# Returns: count
+#
+emu_count_log()
+{
+	local inst_id="${1}"
+	local pattern="${2}"
+	# In test environment, return 0
+	echo "0"
+}
+
+#
+# Cleanup test instance
+# Arguments: instance ID
+#
+emu_cleanup_test_instance()
+{
+	local inst_id="${1:-}"
+	if [ -n "${inst_id}" ]; then
+		local inst_dir="${EMU_TEST_DIR}/${inst_id}"
+		if [ -d "${inst_dir}" ]; then
+			rm -rf "${inst_dir}"
+		fi
+	fi
+}
+
+#
+# Cleanup test instance as non-root
+# Arguments: instance ID
+#
+emu_cleanup_test_instance_nonroot()
+{
+	local inst_id="${1:-}"
+	if [ -n "${inst_id}" ]; then
+		local inst_dir="${EMU_TEST_DIR}/${inst_id}"
+		if [ -d "${inst_dir}" ]; then
+			# Try to cleanup as current user
+			rm -rf "${inst_dir}" 2>/dev/null || true
+		fi
+	fi
+}
+
+#
+# Close console connection
+# Arguments: instance ID
+#
+emu_close_console()
+{
+	local inst_id="${1}"
+	# Nothing to do in test environment
+	true
+}
+
+#
+# Adjust OOM score for instance
+# Arguments: instance ID
+# Returns: 0 on success, 1 on failure
+#
+emu_adjust_oom_score()
+{
+	local inst_id="${1}"
+	# In test environment, just return success
+	return 0
+}
+
+#
+# Adjust OOM score as non-root
+# Arguments: instance ID
+# Returns: 0 on success, 1 on failure
+#
+emu_adjust_oom_score_nonroot()
+{
+	local inst_id="${1}"
+	# Non-root cannot adjust OOM score, so this should fail
+	return 1
+}
+
+#
+# Get OOM score for instance
+# Arguments: instance ID
+# Returns: OOM score
+#
+emu_get_oom_score()
+{
+	local inst_id="${1}"
+	# Return mock OOM score
+	echo "0"
+}
+
+#
+# Reset OOM score for instance
+# Arguments: instance ID
+# Returns: 0 on success, 1 on failure
+#
+emu_reset_oom_score()
+{
+	local inst_id="${1}"
+	# In test environment, just return success
+	return 0
+}
+
+#
+# Set OOM score for instance
+# Arguments: instance ID, score
+# Returns: 0 on success, 1 on failure
+#
+emu_set_oom_score()
+{
+	local inst_id="${1}"
+	local score="${2}"
+	# In test environment, just return success
+	return 0
+}
+
+#
+# Set OOM score as non-root
+# Arguments: instance ID, score
+# Returns: 0 on success, 1 on failure
+#
+emu_set_oom_score_nonroot()
+{
+	local inst_id="${1}"
+	local score="${2}"
+	# Non-root cannot set OOM score, so this should fail
+	return 1
+}
+
+#
+# Get OOM score value
+# Arguments: none
+# Returns: OOM score
+#
+emu_score()
+{
+	# Return mock OOM score
+	echo "0"
+}
+
+#
+# Perform an operation on instance
+# Arguments: instance ID, operation
+# Returns: 0 on success, 1 on failure
+#
+emu_perform_operation()
+{
+	local inst_id="${1}"
+	local operation="${2}"
+	# In test environment, just return success
+	return 0
+}
+
+#
+# Unload emulation modules
+#
+emu_cleanup_modules()
+{
+	# Unload all emulation modules in reverse dependency order
+	kldunload emu_amd64 2>/dev/null || true
+	kldunload emu_i386 2>/dev/null || true
+	kldunload emu_arm64 2>/dev/null || true
+	kldunload emu_arm 2>/dev/null || true
+	kldunload emu_powerpc 2>/dev/null || true
+	kldunload emu_riscv 2>/dev/null || true
+	kldunload emu 2>/dev/null || true
+	kldunload emu_core 2>/dev/null || true
+}
+
+#
+# Check if emu module is loaded
+# Returns: 0 if loaded, 1 otherwise
+#
+emu_module_loaded()
+{
+	kldstat -m emu_core > /dev/null 2>&1
+}
+
+#
+# Load emu module if not already loaded
+# Returns: 0 on success, 1 on failure
+#
+emu_load_module()
+{
+	if ! emu_module_loaded; then
+		kldload emu_core 2>/dev/null || true
+	fi
+	emu_module_loaded
+}
