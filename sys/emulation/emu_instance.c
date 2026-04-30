@@ -104,7 +104,7 @@ struct emu_user_limits {
 /*
  * Global instance registry
  */
-static struct mtx emu_instance_lock;
+struct mtx emu_instance_lock;
 static TAILQ_HEAD(, emu_instance) emu_instances = TAILQ_HEAD_INITIALIZER(emu_instances);
 static TAILQ_HEAD(, emu_user_limits) emu_user_limits = TAILQ_HEAD_INITIALIZER(emu_user_limits);
 
@@ -336,7 +336,7 @@ emu_instance_cansee(struct ucred *cred, struct emu_instance *inst)
  * Find instance by ID with visibility filtering
  * Must be called with emu_instance_lock held
  */
-static struct emu_instance *
+struct emu_instance *
 emu_find_instance(uint64_t inst_id)
 {
 	struct emu_instance *inst;

@@ -7,7 +7,9 @@
 
 .PATH: ${SRCTOP}/sys/emulation
 KMOD=	emu_core
-SRCS=	emu_main.c emu_sysctl.c emu_instance.c emu_access.c emu_stack.c emu_securelevel.c emu_scrub.c emu_rctl.c
+SRCS=	emu_main.c emu_sysctl.c emu_instance.c emu_access.c emu_stack.c
+SRCS+=	emu_securelevel.c emu_scrub.c emu_rctl.c emu_audit.c
+SRCS+=	emu_memmgmt.c emu_smp.c
 
 # Include standard kernel module build rules
 .include <bsd.kmod.mk>
