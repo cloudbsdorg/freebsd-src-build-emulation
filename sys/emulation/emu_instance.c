@@ -54,6 +54,7 @@
 #include "emu_smp.h"
 #include "emu_audit.h"
 #include "emu_securelevel.h"
+#include "emu_memmgmt.h"
 #include "emu_rctl.h"
 
 /*
