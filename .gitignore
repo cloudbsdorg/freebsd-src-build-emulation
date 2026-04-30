@@ -62,3 +62,10 @@ tests/**/signal_test
 tests/**/smp_test
 tests/**/stack_test
 tests/**/toctou_test
+# Emulation framework binaries
+usr.sbin/emu/emu
+usr.sbin/emu/emu.debug
+usr.sbin/emu/emu.full
+usr.sbin/bhyve/bhyve
+usr.sbin/bhyve/bhyve.debug
+usr.sbin/bhyve/bhyve.full
