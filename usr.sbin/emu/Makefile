@@ -29,6 +29,7 @@ SRCS+=	emu_dev_uart.c
 SRCS+=	emu_dev_storage.c
 SRCS+=	emu_dev_net.c
 SRCS+=	emu_dev_rng.c
+SRCS+=	emu_dev_video.c
 SRCS+=	emu_virtqueue.c
 SRCS+=	emu_veriexec.c
 SRCS+=	emu_module.c

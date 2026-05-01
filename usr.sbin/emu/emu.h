@@ -194,6 +194,9 @@ int	emu_image_cleanup(int max_age_days);
 int	emu_veriexec_init(void);
 int	emu_veriexec_is_enforcing(void);
 
+/* Video device for display output and VNC server */
+#include "emu_dev_video.h"
+
 /* Utility functions */
 extern int		g_verbose;
 extern int		g_quiet;

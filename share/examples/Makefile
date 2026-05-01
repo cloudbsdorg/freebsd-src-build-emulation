@@ -80,8 +80,19 @@ SE_EMU= \
 	emu-high.conf \
 	emu-maximum.conf \
 	emu-amd64.conf \
+	emu-amd64-desktop.conf \
+	emu-amd64-server.conf \
+	emu-amd64-gaming.conf \
+	emu-amd64-multimedia.conf \
+	emu-amd64-security-workstation.conf \
+	emu-amd64-legacy-compat.conf \
+	emu-amd64-laptop.conf \
+	emu-amd64-minimal.conf \
+	emu-amd64-compilefarm.conf \
+	emu-amd64-headless.conf \
 	emu-i386.conf \
 	emu-arm64.conf \
+	emu-arm64-server.conf \
 	emu-powerpc-g3.conf \
 	emu-powerpc64.conf \
 	emu-riscv64.conf \

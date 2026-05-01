@@ -24,6 +24,45 @@ device configuration. Choose the configuration that best matches your use case.
 | `emu-powerpc64.conf` | PowerPC 64-bit | Modern PowerPC (G4/G5), servers |
 | `emu-riscv64.conf` | RISC-V 64-bit | Open-source RISC architecture |
 
+## AMD64/x86-64 Variant Configurations
+
+| File | Variant | Video | Use Case |
+|------|---------|-------|----------|
+| `emu-amd64.conf` | Standard | virtio-gpu | General purpose, all devices |
+| `emu-amd64-desktop.conf` | Desktop | virtio-gpu | Workstation, software development |
+| `emu-amd64-server.conf` | Server | none | High-performance server workloads |
+| `emu-amd64-gaming.conf` | Gaming | stdvga | PC gaming with GPU pass-through |
+| `emu-amd64-multimedia.conf` | Multimedia | virtio-gpu | HTPC, Kodi/PLEX, media center |
+| `emu-amd64-security-workstation.conf` | Security | none | High-security sensitive workloads |
+| `emu-amd64-legacy-compat.conf` | Legacy | cirrus | Windows XP/7, legacy OS compatibility |
+| `emu-amd64-laptop.conf` | Laptop | virtio-gpu | Portable workstations, mobility |
+| `emu-amd64-minimal.conf` | Minimal | none | Resource-constrained environments |
+| `emu-amd64-compilefarm.conf` | Compile Farm | none | Build servers, HPC workloads |
+| `emu-amd64-headless.conf` | Headless | none | Background services, CI/CD pipelines |
+
+### Video Device Options
+
+| Setting | Description |
+|---------|------------|
+| `video_device=none` | Headless (serial console only) |
+| `video_device=stdvga` | Standard VGA, BIOS boot support |
+| `video_device=cirrus` | Cirrus Logic GD5446, legacy Windows |
+| `video_device=virtio-gpu` | Modern VirtIO GPU, Linux/BSD guests |
+| `video_device=vmware-svga` | VMware SVGA II, compatibility mode |
+
+### Resolution Options
+
+| Setting | Dimensions | Use Case |
+|---------|------------|----------|
+| `video_width=640` | 640x480 | Legacy, minimal |
+| `video_width=800` | 800x600 | Basic desktop |
+| `video_width=1024` | 1024x768 | Standard desktop |
+| `video_width=1280` | 1280x800 | Widescreen laptop |
+| `video_width=1920` | 1920x1080 | Full HD (1080p) |
+| `video_width=1920` | 1920x1200 | Widescreen 16:10 |
+| `video_width=2560` | 2560x1440 | Quad HD (1440p) |
+| `video_width=3840` | 3840x2160 | Ultra HD (4K) |
+
 ## Device-Specific Configurations
 
 | File | Devices | Use Case |
