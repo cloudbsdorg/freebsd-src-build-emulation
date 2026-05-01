@@ -1,10 +1,10 @@
 # FreeBSD Emulation Framework - Example Configurations
 
 This directory contains example configuration files for the FreeBSD emulation
-framework at different security levels. Choose the configuration that best
-matches your use case.
+framework. Configurations are organized by security level, architecture, and
+device configuration. Choose the configuration that best matches your use case.
 
-## Configuration Files
+## Security-Level Configurations
 
 | File | Security Level | Use Case |
 |------|---------------|----------|
@@ -12,6 +12,27 @@ matches your use case.
 | `emu-standard.conf` | Standard | Development servers, general use |
 | `emu-high.conf` | High | Production servers, sensitive data |
 | `emu-maximum.conf` | Maximum | Critical infrastructure, highest security |
+
+## Architecture-Specific Configurations
+
+| File | Architecture | Use Case |
+|------|-------------|----------|
+| `emu-amd64.conf` | x86-64/AMD64 | Standard 64-bit x86 emulation |
+| `emu-i386.conf` | i386/IA-32 | Legacy 32-bit x86 systems |
+| `emu-arm64.conf` | ARM64/AArch64 | 64-bit ARM systems |
+| `emu-powerpc-g3.conf` | PowerPC G3 | Classic Mac OS X / Mac OS 9 emulation |
+| `emu-powerpc64.conf` | PowerPC 64-bit | Modern PowerPC (G4/G5), servers |
+| `emu-riscv64.conf` | RISC-V 64-bit | Open-source RISC architecture |
+
+## Device-Specific Configurations
+
+| File | Devices | Use Case |
+|------|---------|----------|
+| `emu-network-only.conf` | Network only | Routers, firewalls, network services |
+| `emu-storage-only.conf` | Storage only | File servers, databases, air-gapped |
+| `emu-no-devices.conf` | No devices | Pure computation, HPC, compile farms |
+| `emu-minimal.conf` | Minimal | Embedded, IoT, resource-constrained |
+| `emu-full-devices.conf` | All devices | Desktop, legacy hardware, testing |
 
 ## Security Level Comparison
 

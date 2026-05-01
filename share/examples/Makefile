@@ -78,7 +78,18 @@ SE_EMU= \
 	emu-basic.conf \
 	emu-standard.conf \
 	emu-high.conf \
-	emu-maximum.conf
+	emu-maximum.conf \
+	emu-amd64.conf \
+	emu-i386.conf \
+	emu-arm64.conf \
+	emu-powerpc-g3.conf \
+	emu-powerpc64.conf \
+	emu-riscv64.conf \
+	emu-network-only.conf \
+	emu-storage-only.conf \
+	emu-no-devices.conf \
+	emu-minimal.conf \
+	emu-full-devices.conf
 
 SE_DIRS+=	etc
 SE_ETC= \
